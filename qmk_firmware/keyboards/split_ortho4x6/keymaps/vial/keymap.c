@@ -26,17 +26,18 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
                 LT(6,KC_SPACE),     LT(2,KC_LANGUAGE_1),                               KC_ESCAPE
     ),
     [1] = LAYOUT(
-              KC_ESCAPE,  (QK_LGUI|KC_W),  (QK_LGUI|KC_E),  (QK_LGUI|KC_R),
-         (QK_LGUI|KC_T),  KC_TRANSPARENT,  (QK_LGUI|KC_A),  (QK_LGUI|KC_S),
-         (QK_LGUI|KC_D),  (QK_LGUI|KC_F),  (QK_LGUI|KC_G),  KC_TRANSPARENT,
-         (QK_LGUI|KC_Z),  (QK_LGUI|KC_X),  (QK_LGUI|KC_C),  (QK_LGUI|KC_V),
-         (QK_LGUI|KC_B),  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,
-        (QK_LGUI|KC_ENTER),  KC_TRANSPARENT,  (QK_LSFT|KC_6),  (QK_LSFT|KC_7),
-         (QK_LSFT|KC_8),  (QK_LSFT|KC_9),        KC_MINUS,  KC_TRANSPARENT,
-         (QK_LGUI|KC_H),  (QK_LGUI|KC_J),  (QK_LGUI|KC_K),  (QK_LGUI|KC_L),
-               KC_EQUAL,  (QK_LGUI|KC_N),  (QK_LGUI|KC_M), (QK_LGUI|KC_COMMA),
-        (QK_LGUI|KC_DOT), (QK_LSFT|KC_INTERNATIONAL_1), (QK_LGUI|KC_SPACE),  KC_TRANSPARENT,
-         KC_TRANSPARENT
+                /* 左手側 */
+                   KC_ESCAPE,       (QK_LGUI|KC_W),  (QK_LGUI|KC_E),  (QK_LGUI|KC_R),  (QK_LGUI|KC_T),       KC_TRANSPARENT,  
+                   (QK_LGUI|KC_A),  (QK_LGUI|KC_S),  (QK_LGUI|KC_D),  (QK_LGUI|KC_F),  (QK_LGUI|KC_G),       KC_TRANSPARENT,
+                   (QK_LGUI|KC_Z),  (QK_LGUI|KC_X),  (QK_LGUI|KC_C),  (QK_LGUI|KC_V),  (QK_LGUI|KC_B),  
+                   KC_TRANSPARENT,                                    KC_TRANSPARENT,  KC_TRANSPARENT,       (QK_LGUI|KC_ENTER),  
+                /* 右手側 */
+                KC_TRANSPARENT,  
+                   (QK_LSFT|KC_6),  (QK_LSFT|KC_7),  (QK_LSFT|KC_8),  (QK_LSFT|KC_9),  KC_MINUS, 
+                KC_TRANSPARENT,
+                   (QK_LGUI|KC_H),  (QK_LGUI|KC_J),  (QK_LGUI|KC_K),  (QK_LGUI|KC_L),  KC_EQUAL,
+                   (QK_LGUI|KC_N),  (QK_LGUI|KC_M), (QK_LGUI|KC_COMMA),(QK_LGUI|KC_DOT), (QK_LSFT|KC_INTERNATIONAL_1), 
+                (QK_LGUI|KC_SPACE),  KC_TRANSPARENT,                                   KC_TRANSPARENT
     ),
     [2] = LAYOUT(
                    KC_1,         KC_KP_2,         KC_KP_3,         KC_KP_4,
@@ -142,7 +143,7 @@ const vial_tap_dance_entry_t default_tap_dance_entries[] = {
 #define COMBO_ENTRY(k1, k2, k3, k4, result) ((vial_combo_entry_t){.input ={k1, k2, k3, k4}, .output = result})
 #if VIAL_COMBO_ENTRIES > 0
 const vial_combo_entry_t PROGMEM default_combo_entries[] = {
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
+    COMBO_ENTRY(KC_Q,  KC_W,  KC_NO, KC_NO, KC_TAB),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
