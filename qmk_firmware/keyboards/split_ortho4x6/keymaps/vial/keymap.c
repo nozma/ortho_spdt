@@ -5,83 +5,89 @@
 #include <stdbool.h>
 #include <stdlib.h> // abs
 
-// 既存のレイアウト配列は環境依存のため、空配列のまま残します
+// 既存のレイアウト配列（環境依存のため空のまま）
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {};
 
-// ------------------------------------------------------------
-// 可変パラメータ
-// ------------------------------------------------------------
+// ==== 可変パラメータ（必要に応じて調整） =========================
 static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 static const int8_t   kAngleList[] = { -90,-60,-45,-30,-15,0,15,30,45,60,90 };
 static const uint8_t  kScrDivList[]= { 0,1,2,3,4,5 }; // 2^div のシフト量
 
-// ------------------------------------------------------------
-// 左右の設定を1つの32bitに圧縮してEEPROM保存
-//  (13bit×2=26bit + 予約6bit = 32bit)
-// ------------------------------------------------------------
-typedef union {
-    uint32_t raw;
-    struct {
-        // 左
-        uint32_t l_cpi_idx     : 4; // 0..15
-        uint32_t l_rot_idx     : 4; // 0..15
-        uint32_t l_scr_div_idx : 3; // 0..7
-        uint32_t l_scr_invert  : 1; // bool
-        uint32_t l_scroll_mode : 1; // bool
-        // 右
-        uint32_t r_cpi_idx     : 4;
-        uint32_t r_rot_idx     : 4;
-        uint32_t r_scr_div_idx : 3;
-        uint32_t r_scr_invert  : 1;
-        uint32_t r_scroll_mode : 1;
-        // 予約
-        uint32_t _reserved     : 6;
-    };
-} tb_cfg_t;
+// 「CPI」はここでは移動量のソフト倍率で再現（ハードCPIは後述）
+#define CPI_BASE 800  // 800cpi を基準1.0として扱う
 
-static tb_cfg_t g_cfg;
+// ==== EEPROM保存（左右まとめて 32bit にパック） ==================
+typedef struct {
+    uint8_t cpi_idx;     // 0..15
+    uint8_t rot_idx;     // 0..15
+    uint8_t scr_div_idx; // 0..7
+    bool    scr_invert;  // 0/1
+    bool    scroll_mode; // 0:cursor 1:scroll
+} side_cfg_t;
 
-// 破損時の初期化
-static void tb_eeprom_init(void) {
-    g_cfg.raw = 0;
-    // 既定値: CPI=800(index 2), 角度=0°(index 5), スクロール分割=2 (中くらい)
-    g_cfg.l_cpi_idx     = (ARRAY_SIZE(kCpiList)   > 2) ? 2 : 0;
-    g_cfg.l_rot_idx     = (ARRAY_SIZE(kAngleList) > 5) ? 5 : 0;
-    g_cfg.l_scr_div_idx = (ARRAY_SIZE(kScrDivList)> 2) ? 2 : 0;
-    g_cfg.l_scr_invert  = 0;
-    g_cfg.l_scroll_mode = 0;
+static side_cfg_t gL, gR;
 
-    g_cfg.r_cpi_idx     = g_cfg.l_cpi_idx;
-    g_cfg.r_rot_idx     = g_cfg.l_rot_idx;
-    g_cfg.r_scr_div_idx = g_cfg.l_scr_div_idx;
-    g_cfg.r_scr_invert  = 0;
-    g_cfg.r_scroll_mode = 0;
+static inline uint32_t pack_cfg(void) {
+    uint32_t v = 0;
+    v |= (uint32_t)(gL.cpi_idx     & 0xF)      << 0;
+    v |= (uint32_t)(gL.rot_idx     & 0xF)      << 4;
+    v |= (uint32_t)(gL.scr_div_idx & 0x7)      << 8;
+    v |= (uint32_t)(gL.scr_invert  ? 1 : 0)    << 11;
+    v |= (uint32_t)(gL.scroll_mode ? 1 : 0)    << 12;
 
-    eeconfig_update_kb(g_cfg.raw);
+    v |= (uint32_t)(gR.cpi_idx     & 0xF)      << 13;
+    v |= (uint32_t)(gR.rot_idx     & 0xF)      << 17;
+    v |= (uint32_t)(gR.scr_div_idx & 0x7)      << 21;
+    v |= (uint32_t)(gR.scr_invert  ? 1 : 0)    << 24;
+    v |= (uint32_t)(gR.scroll_mode ? 1 : 0)    << 25;
+    return v;
 }
+static inline void unpack_cfg(uint32_t v) {
+    gL.cpi_idx     = (v >> 0)  & 0xF;
+    gL.rot_idx     = (v >> 4)  & 0xF;
+    gL.scr_div_idx = (v >> 8)  & 0x7;
+    gL.scr_invert  = ((v >> 11) & 1) != 0;
+    gL.scroll_mode = ((v >> 12) & 1) != 0;
 
+    gR.cpi_idx     = (v >> 13) & 0xF;
+    gR.rot_idx     = (v >> 17) & 0xF;
+    gR.scr_div_idx = (v >> 21) & 0x7;
+    gR.scr_invert  = ((v >> 24) & 1) != 0;
+    gR.scroll_mode = ((v >> 25) & 1) != 0;
+}
+static void tb_eeprom_defaults(void) {
+    gL.cpi_idx     = (ARRAY_SIZE(kCpiList)   > 2) ? 2 : 0; // 800
+    gL.rot_idx     = (ARRAY_SIZE(kAngleList) > 5) ? 5 : 0; // 0°
+    gL.scr_div_idx = (ARRAY_SIZE(kScrDivList)> 2) ? 2 : 0;
+    gL.scr_invert  = false;
+    gL.scroll_mode = false;
+
+    gR = gL;
+}
 static void tb_load_eeprom(void) {
-    g_cfg.raw = eeconfig_read_kb();
+    uint32_t raw = eeconfig_read_kb();
+    unpack_cfg(raw);
+
     bool bad =
-        (g_cfg.l_cpi_idx     >= ARRAY_SIZE(kCpiList))    ||
-        (g_cfg.l_rot_idx     >= ARRAY_SIZE(kAngleList))  ||
-        (g_cfg.l_scr_div_idx >= ARRAY_SIZE(kScrDivList)) ||
-        (g_cfg.r_cpi_idx     >= ARRAY_SIZE(kCpiList))    ||
-        (g_cfg.r_rot_idx     >= ARRAY_SIZE(kAngleList))  ||
-        (g_cfg.r_scr_div_idx >= ARRAY_SIZE(kScrDivList));
+        gL.cpi_idx     >= ARRAY_SIZE(kCpiList)   ||
+        gL.rot_idx     >= ARRAY_SIZE(kAngleList) ||
+        gL.scr_div_idx >= ARRAY_SIZE(kScrDivList)||
+        gR.cpi_idx     >= ARRAY_SIZE(kCpiList)   ||
+        gR.rot_idx     >= ARRAY_SIZE(kAngleList) ||
+        gR.scr_div_idx >= ARRAY_SIZE(kScrDivList);
 
-    if (bad) tb_eeprom_init();
+    if (bad) {
+        tb_eeprom_defaults();
+        eeconfig_update_kb(pack_cfg());
+    }
 }
+static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
 
-static inline void tb_save(void) { eeconfig_update_kb(g_cfg.raw); }
+// レガシー互換の薄いラッパ（以前の関数名を残したい場合に使用）
+static inline void tb_load_eeprom_side(bool _is_left){ (void)_is_left; tb_load_eeprom(); }
+static inline void tb_save_eeprom_side(bool _is_left){ (void)_is_left; tb_save(); }
 
-// 互換のためのラッパ（呼び出し側のシグネチャを維持）
-static void tb_load_eeprom_side(bool _is_left) { (void)_is_left; tb_load_eeprom(); }
-static void tb_save_eeprom_side(bool _is_left) { (void)_is_left; tb_save(); }
-
-// ------------------------------------------------------------
-// 2D回転（整数近似）
-// ------------------------------------------------------------
+// ==== 2D回転（整数近似） ==========================================
 static inline void rotate_xy(int8_t* x, int8_t* y, int8_t deg) {
     int8_t ox = *x, oy = *y;
     switch (deg) {
@@ -99,10 +105,7 @@ static inline void rotate_xy(int8_t* x, int8_t* y, int8_t deg) {
     }
 }
 
-// ------------------------------------------------------------
-// スクロール変換（左右別の蓄積）
-//  ※ config.h で WHEEL_EXTENDED_REPORT / MOUSE_EXTENDED_REPORT を有効推奨
-// ------------------------------------------------------------
+// ==== スクロール変換（左右別の蓄積） ==============================
 static int v_acc_l = 0, h_acc_l = 0;
 static int v_acc_r = 0, h_acc_r = 0;
 
@@ -111,9 +114,8 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
     int8_t x = r->x, y = r->y;
-
-    // どちらかを0にして1D寄せ（好みに応じて調整可）
-    if (abs(x) > abs(y)) y = 0; else x = 0;
+    // どちらかを0にして1D寄せ
+    if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
 
     if (invert) { x = -x; y = -y; }
 
@@ -131,18 +133,28 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     r->y = 0;
 }
 
-// ------------------------------------------------------------
-// ハードウェアCPI（左右独立）
-// ※ 環境のQMKに point ing_device_set_cpi_on_side がある前提
-// ------------------------------------------------------------
-static void apply_cpi(bool is_left) {
-    uint16_t cpi = is_left ? kCpiList[g_cfg.l_cpi_idx] : kCpiList[g_cfg.r_cpi_idx];
-    pointing_device_set_cpi_on_side(is_left, cpi);
+// ==== 移動量のソフト倍率（左右別） ================================
+static int x_acc_l = 0, y_acc_l = 0;
+static int x_acc_r = 0, y_acc_r = 0;
+
+static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
+    int *xa = is_left ? &x_acc_l : &x_acc_r;
+    int *ya = is_left ? &y_acc_l : &y_acc_r;
+
+    *xa += (int)r->x * (int)cpi;
+    *ya += (int)r->y * (int)cpi;
+
+    int8_t ox = (int8_t)(*xa / CPI_BASE);
+    int8_t oy = (int8_t)(*ya / CPI_BASE);
+
+    r->x = ox;
+    r->y = oy;
+
+    *xa -= ox * CPI_BASE;
+    *ya -= oy * CPI_BASE;
 }
 
-// ------------------------------------------------------------
-// カスタムキーコード
-// ------------------------------------------------------------
+// ==== カスタムキーコード ==========================================
 enum custom_keycodes {
     TB_L_CPI_NEXT = SAFE_RANGE, TB_L_CPI_PREV,
     TB_L_ROT_NEXT, TB_L_ROT_PREV,
@@ -155,121 +167,80 @@ enum custom_keycodes {
     TB_R_SCR_INV,
 };
 
-// ------------------------------------------------------------
-// 初期化フック
-// ------------------------------------------------------------
-void keyboard_post_init_kb(void) {
-    tb_load_eeprom_side(true);
-    // 左右分は1つの構造体に格納しているため、両側読み込みは不要だが互換のため残す
-    tb_load_eeprom_side(false);
-    apply_cpi(true);
-    apply_cpi(false);
+// ==== 初期化フック（_user を使用） ================================
+void keyboard_post_init_user(void) {
+    tb_load_eeprom();
 }
 
-// ------------------------------------------------------------
-// キー処理（押下時）
-// ------------------------------------------------------------
-bool process_record_kb(uint16_t keycode, keyrecord_t* record) {
+// ==== キー処理（押下時）（_user を使用） ==========================
+bool process_record_user(uint16_t keycode, keyrecord_t* record) {
     if (!record->event.pressed) return true;
 
     switch (keycode) {
         // 左
         case TB_L_CPI_NEXT:
-            g_cfg.l_cpi_idx = (g_cfg.l_cpi_idx + 1) % ARRAY_SIZE(kCpiList);
-            tb_save_eeprom_side(true);
-            apply_cpi(true);
-            return false;
+            gL.cpi_idx = (gL.cpi_idx + 1) % ARRAY_SIZE(kCpiList); tb_save(); return false;
         case TB_L_CPI_PREV:
-            g_cfg.l_cpi_idx = (g_cfg.l_cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList);
-            tb_save_eeprom_side(true);
-            apply_cpi(true);
-            return false;
+            gL.cpi_idx = (gL.cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList); tb_save(); return false;
         case TB_L_ROT_NEXT:
-            g_cfg.l_rot_idx = (g_cfg.l_rot_idx + 1) % ARRAY_SIZE(kAngleList);
-            tb_save_eeprom_side(true);
-            return false;
+            gL.rot_idx = (gL.rot_idx + 1) % ARRAY_SIZE(kAngleList); tb_save(); return false;
         case TB_L_ROT_PREV:
-            g_cfg.l_rot_idx = (g_cfg.l_rot_idx + ARRAY_SIZE(kAngleList) - 1) % ARRAY_SIZE(kAngleList);
-            tb_save_eeprom_side(true);
-            return false;
+            gL.rot_idx = (gL.rot_idx + ARRAY_SIZE(kAngleList) - 1) % ARRAY_SIZE(kAngleList); tb_save(); return false;
         case TB_L_SCR_TOG:
-            g_cfg.l_scroll_mode ^= 1;
-            tb_save_eeprom_side(true);
-            return false;
+            gL.scroll_mode ^= 1; tb_save(); return false;
         case TB_L_SCR_DIV:
-            g_cfg.l_scr_div_idx = (g_cfg.l_scr_div_idx + 1) % ARRAY_SIZE(kScrDivList);
-            tb_save_eeprom_side(true);
-            return false;
+            gL.scr_div_idx = (gL.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); return false;
         case TB_L_SCR_INV:
-            g_cfg.l_scr_invert ^= 1;
-            tb_save_eeprom_side(true);
-            return false;
+            gL.scr_invert ^= 1; tb_save(); return false;
 
         // 右
         case TB_R_CPI_NEXT:
-            g_cfg.r_cpi_idx = (g_cfg.r_cpi_idx + 1) % ARRAY_SIZE(kCpiList);
-            tb_save_eeprom_side(false);
-            apply_cpi(false);
-            return false;
+            gR.cpi_idx = (gR.cpi_idx + 1) % ARRAY_SIZE(kCpiList); tb_save(); return false;
         case TB_R_CPI_PREV:
-            g_cfg.r_cpi_idx = (g_cfg.r_cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList);
-            tb_save_eeprom_side(false);
-            apply_cpi(false);
-            return false;
+            gR.cpi_idx = (gR.cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList); tb_save(); return false;
         case TB_R_ROT_NEXT:
-            g_cfg.r_rot_idx = (g_cfg.r_rot_idx + 1) % ARRAY_SIZE(kAngleList);
-            tb_save_eeprom_side(false);
-            return false;
+            gR.rot_idx = (gR.rot_idx + 1) % ARRAY_SIZE(kAngleList); tb_save(); return false;
         case TB_R_ROT_PREV:
-            g_cfg.r_rot_idx = (g_cfg.r_rot_idx + ARRAY_SIZE(kAngleList) - 1) % ARRAY_SIZE(kAngleList);
-            tb_save_eeprom_side(false);
-            return false;
+            gR.rot_idx = (gR.rot_idx + ARRAY_SIZE(kAngleList) - 1) % ARRAY_SIZE(kAngleList); tb_save(); return false;
         case TB_R_SCR_TOG:
-            g_cfg.r_scroll_mode ^= 1;
-            tb_save_eeprom_side(false);
-            return false;
+            gR.scroll_mode ^= 1; tb_save(); return false;
         case TB_R_SCR_DIV:
-            g_cfg.r_scr_div_idx = (g_cfg.r_scr_div_idx + 1) % ARRAY_SIZE(kScrDivList);
-            tb_save_eeprom_side(false);
-            return false;
+            gR.scr_div_idx = (gR.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); return false;
         case TB_R_SCR_INV:
-            g_cfg.r_scr_invert ^= 1;
-            tb_save_eeprom_side(false);
-            return false;
+            gR.scr_invert ^= 1; tb_save(); return false;
     }
     return true;
 }
 
-// ------------------------------------------------------------
-// COMBINED モード：左右レポートを個別加工して合成
-// ------------------------------------------------------------
-report_mouse_t pointing_device_task_combined_kb(report_mouse_t left, report_mouse_t right) {
+// ==== COMBINED モードのポインティング処理（_user を使用） =========
+report_mouse_t pointing_device_task_combined_user(report_mouse_t left, report_mouse_t right) {
     // 左
     {
         int8_t x = left.x, y = left.y;
-        int8_t deg = kAngleList[g_cfg.l_rot_idx];
+        int8_t deg = kAngleList[gL.rot_idx];
         rotate_xy(&x, &y, deg);
         left.x = x; left.y = y;
 
-        if (g_cfg.l_scroll_mode) {
-            apply_scroll(&left, g_cfg.l_scr_invert, g_cfg.l_scr_div_idx, true);
+        if (gL.scroll_mode) {
+            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
+        } else {
+            apply_move_scale(&left, kCpiList[gL.cpi_idx], true);
         }
-        // カーソル移動モード時はXYをそのまま（CPIはハード側で反映）
     }
 
     // 右
     {
         int8_t x = right.x, y = right.y;
-        int8_t deg = kAngleList[g_cfg.r_rot_idx];
+        int8_t deg = kAngleList[gR.rot_idx];
         rotate_xy(&x, &y, deg);
         right.x = x; right.y = y;
 
-        if (g_cfg.r_scroll_mode) {
-            apply_scroll(&right, g_cfg.r_scr_invert, g_cfg.r_scr_div_idx, false);
+        if (gR.scroll_mode) {
+            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
+        } else {
+            apply_move_scale(&right, kCpiList[gR.cpi_idx], false);
         }
-        // カーソル移動モード時はXYをそのまま（CPIはハード側で反映）
     }
 
-    // 値渡しでOK（&は不要）
     return pointing_device_combine_reports(left, right);
 }
