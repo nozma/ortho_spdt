@@ -156,7 +156,7 @@ static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
 
 // ==== カスタムキーコード ==========================================
 enum custom_keycodes {
-    TB_L_CPI_NEXT = SAFE_RANGE, TB_L_CPI_PREV,
+    TB_L_CPI_NEXT = QK_KB_0, TB_L_CPI_PREV,
     TB_L_ROT_NEXT, TB_L_ROT_PREV,
     TB_L_SCR_TOG,  TB_L_SCR_DIV,
     TB_L_SCR_INV,
