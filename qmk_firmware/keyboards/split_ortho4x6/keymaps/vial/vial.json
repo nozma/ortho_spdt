@@ -129,5 +129,77 @@
                 "7,5\n\n\n0,0"
             ]
         ]
-    }
+    },
+    "customKeycodes": [
+        {
+            "name": "Trackball Left",
+            "title": "左: CPIを次へ",
+            "shortName": "L CPI+"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: CPIを前へ",
+            "shortName": "L CPI-"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: 回転+1段階",
+            "shortName": "L ROT+"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: 回転-1段階",
+            "shortName": "L ROT-"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: スクロール切替",
+            "shortName": "L SCR"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: スクロール分割",
+            "shortName": "L SDIV"
+        },
+        {
+            "name": "Trackball Left",
+            "title": "左: スクロール反転",
+            "shortName": "L SINV"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: CPIを次へ",
+            "shortName": "R CPI+"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: CPIを前へ",
+            "shortName": "R CPI-"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: 回転+1段階",
+            "shortName": "R ROT+"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: 回転-1段階",
+            "shortName": "R ROT-"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: スクロール切替",
+            "shortName": "R SCR"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: スクロール分割",
+            "shortName": "R SDIV"
+        },
+        {
+            "name": "Trackball Right",
+            "title": "右: スクロール反転",
+            "shortName": "R SINV"
+        }
+    ]
 }
