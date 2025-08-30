@@ -15,8 +15,6 @@ static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 static const int8_t   kAngleList[] = { -90,-60,-45,-30,-15,0,15,30,45,60,90 };
 static const uint8_t  kScrDivList[]= { 0,1,2,3,4,5 }; // 2^div のシフト量
 
-#define ARRAY_SIZE(a) ((uint8_t)(sizeof(a)/sizeof((a)[0])))
-
 // ------------------------------------------------------------
 // 左右の設定を1つの32bitに圧縮してEEPROM保存
 //  (13bit×2=26bit + 予約6bit = 32bit)
