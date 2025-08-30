@@ -272,6 +272,8 @@ void __wrap_dynamic_keymap_reset(void) {
 // ==== 可変パラメータ（必要に応じて調整） =========================
 static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 static const int8_t   kAngleList[] = { -90,-60,-45,-30,-15,0,15,30,45,60,90 };
+static const int16_t COS_Q10[] = {    0,  512,  724,  887,  990, 1024,  990,  887,  724,  512,    0};
+static const int16_t SIN_Q10[] = {-1024, -887, -724, -512, -259,    0,  259,  512,  724,  887, 1024};
 static const uint8_t  kScrDivList[]= { 3,4,5,6,7,8 }; // 2^div のシフト量
 
 // 「CPI」はここでは移動量のソフト倍率で再現（ハードCPIは後述）
@@ -371,6 +373,16 @@ static inline void rotate_xy(int8_t* x, int8_t* y, int8_t deg) {
         default:   break; // 0°
     }
 }
+static inline void rotate_xy_idx(int8_t* x, int8_t* y, uint8_t idx) {
+    int8_t ox = *x, oy = *y;
+    int32_t rx = (int32_t)ox * COS_Q10[idx] - (int32_t)oy * SIN_Q10[idx];
+    int32_t ry = (int32_t)ox * SIN_Q10[idx] + (int32_t)oy * COS_Q10[idx];
+    rx += (rx >= 0 ? 512 : -512); ry += (ry >= 0 ? 512 : -512); // 四捨五入
+    rx >>= 10; ry >>= 10;
+    if (rx > 127) rx = 127; else if (rx < -127) rx = -127;
+    if (ry > 127) ry = 127; else if (ry < -127) ry = -127;
+    *x = (int8_t)rx; *y = (int8_t)ry;
+}
 
 // ==== スクロール変換（左右別の蓄積） ==============================
 static int v_acc_l = 0, h_acc_l = 0;
@@ -401,24 +413,28 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 }
 
 // ==== 移動量のソフト倍率（左右別） ================================
-static int x_acc_l = 0, y_acc_l = 0;
-static int x_acc_r = 0, y_acc_r = 0;
+static int64_t x_acc_l=0, y_acc_l=0, x_acc_r=0, y_acc_r=0;
 
 static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
-    int *xa = is_left ? &x_acc_l : &x_acc_r;
-    int *ya = is_left ? &y_acc_l : &y_acc_r;
+    int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
+    int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
 
-    *xa += (int)r->x * (int)cpi;
-    *ya += (int)r->y * (int)cpi;
+    *xa += (int64_t)r->x * (int64_t)cpi;
+    *ya += (int64_t)r->y * (int64_t)cpi;
 
-    int8_t ox = (int8_t)(*xa / CPI_BASE);
-    int8_t oy = (int8_t)(*ya / CPI_BASE);
+    int32_t ox = (int32_t)(*xa / CPI_BASE);
+    int32_t oy = (int32_t)(*ya / CPI_BASE);
+    if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
+    if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
 
-    r->x = ox;
-    r->y = oy;
+    r->x = (int8_t)ox; r->y = (int8_t)oy;
+    *xa -= (int64_t)ox * CPI_BASE;
+    *ya -= (int64_t)oy * CPI_BASE;
 
-    *xa -= ox * CPI_BASE;
-    *ya -= oy * CPI_BASE;
+    // 残差を安全範囲にクリップ（暴走保険）
+    const int64_t bound = (int64_t)CPI_BASE * 512;
+    if (*xa >  bound) *xa =  bound; if (*xa < -bound) *xa = -bound;
+    if (*ya >  bound) *ya =  bound; if (*ya < -bound) *ya = -bound;
 }
 
 // ==== カスタムキーコード ==========================================
@@ -484,8 +500,7 @@ report_mouse_t pointing_device_task_combined_user(report_mouse_t left, report_mo
     // 左
     {
         int8_t x = left.x, y = left.y;
-        int8_t deg = kAngleList[gL.rot_idx];
-        rotate_xy(&x, &y, deg);
+        rotate_xy_idx(&x, &y, gL.rot_idx);
         left.x = x; left.y = y;
 
         if (gL.scroll_mode) {
@@ -498,8 +513,7 @@ report_mouse_t pointing_device_task_combined_user(report_mouse_t left, report_mo
     // 右
     {
         int8_t x = right.x, y = right.y;
-        int8_t deg = kAngleList[gR.rot_idx];
-        rotate_xy(&x, &y, deg);
+        rotate_xy_idx(&x, &y, gR.rot_idx);
         right.x = x; right.y = y;
 
         if (gR.scroll_mode) {
