@@ -11,7 +11,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {};
 // ==== 可変パラメータ（必要に応じて調整） =========================
 static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 static const int8_t   kAngleList[] = { -90,-60,-45,-30,-15,0,15,30,45,60,90 };
-static const uint8_t  kScrDivList[]= { 0,1,2,3,4,5 }; // 2^div のシフト量
+static const uint8_t  kScrDivList[]= { 3,4,5,6,7,8 }; // 2^div のシフト量
 
 // 「CPI」はここでは移動量のソフト倍率で再現（ハードCPIは後述）
 #define CPI_BASE 800  // 800cpi を基準1.0として扱う
@@ -56,13 +56,19 @@ static inline void unpack_cfg(uint32_t v) {
     gR.scroll_mode = ((v >> 25) & 1) != 0;
 }
 static void tb_eeprom_defaults(void) {
-    gL.cpi_idx     = (ARRAY_SIZE(kCpiList)   > 2) ? 2 : 0; // 800
-    gL.rot_idx     = (ARRAY_SIZE(kAngleList) > 5) ? 5 : 0; // 0°
-    gL.scr_div_idx = (ARRAY_SIZE(kScrDivList)> 2) ? 2 : 0;
+    // 左
+    gL.cpi_idx     = 2;   // 800cpi
+    gL.rot_idx     = 5;   // 0°
+    gL.scr_div_idx = 5;   // スクロール弱め
     gL.scr_invert  = false;
-    gL.scroll_mode = false;
+    gL.scroll_mode = true;
 
-    gR = gL;
+    // 右（例として左よりさらに弱く・逆スクロール）
+    gR.cpi_idx     = 2;   // 800cpi
+    gR.rot_idx     = 5;   // 0°
+    gR.scr_div_idx = 3;
+    gR.scr_invert  = false;
+    gR.scroll_mode = false;
 }
 static void tb_load_eeprom(void) {
     uint32_t raw = eeconfig_read_kb();
