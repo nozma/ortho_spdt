@@ -14,10 +14,10 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [0] = LAYOUT(
                    KC_Q,            KC_W,            KC_E,            KC_R,
                    KC_T,         QK_BOOT,      LT(3,KC_A),            KC_S,
-                   KC_D,            KC_F,            KC_G,         QK_BOOT,
+                   KC_D,            KC_F,            KC_G,  KC_TRANSPARENT,
            LSFT_T(KC_Z),            KC_X,            KC_C,            KC_V,
                    KC_B,     KC_LEFT_GUI,     KC_LEFT_ALT, LT(1,KC_LANGUAGE_2),
-         LT(5,KC_ENTER),  KC_TRANSPARENT,            KC_Y,            KC_U,
+         LT(5,KC_ENTER),         QK_BOOT,            KC_Y,            KC_U,
                    KC_I,            KC_O,            KC_P,  KC_TRANSPARENT,
                    KC_H,            KC_J,            KC_K,      LT(4,KC_L),
            KC_SEMICOLON,            KC_N,            KC_M,        KC_COMMA,
