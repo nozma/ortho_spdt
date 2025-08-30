@@ -433,8 +433,11 @@ static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
 
     // 残差を安全範囲にクリップ（暴走保険）
     const int64_t bound = (int64_t)CPI_BASE * 512;
-    if (*xa >  bound) *xa =  bound; if (*xa < -bound) *xa = -bound;
-    if (*ya >  bound) *ya =  bound; if (*ya < -bound) *ya = -bound;
+    const int64_t bound = (int64_t)CPI_BASE * 512;
+    if (*xa >  bound) { *xa =  bound; }
+    if (*xa < -bound) { *xa = -bound; }
+    if (*ya >  bound) { *ya =  bound; }
+    if (*ya < -bound) { *ya = -bound; }
 }
 
 // ==== カスタムキーコード ==========================================
