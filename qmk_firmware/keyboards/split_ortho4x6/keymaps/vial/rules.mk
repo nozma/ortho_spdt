@@ -11,3 +11,6 @@ SRC += paw3222.c
 POINTING_DEVICE_ENABLE = yes
 SPLIT_POINTING_ENABLE = yes
 POINTING_DEVICE_COMBINED = yes
+
+# Override dynamic_keymap_reset
+LDFLAGS += -Wl,-wrap=dynamic_keymap_reset
