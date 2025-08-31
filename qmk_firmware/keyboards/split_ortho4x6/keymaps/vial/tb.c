@@ -40,7 +40,7 @@ typedef struct {
 static side_cfg_t gL, gR;
 
 // 共有（左右で共通）設定：カーソル加速度
-static bool    gAccelEnable = false;
+static bool    gAccelEnable = true;
 static uint8_t gAccelGainIdx = 0; // 0..kAccelGainMaxIdx
 
 static inline uint32_t pack_cfg(void) {
@@ -96,7 +96,7 @@ static void tb_eeprom_defaults(void) {
     gR.scroll_mode = false;
 
     // 共有
-    gAccelEnable   = false; // 既定はOFF
+    gAccelEnable   = true;  // 既定はON
     gAccelGainIdx  = 3;     // ほどほど（32）
 }
 
