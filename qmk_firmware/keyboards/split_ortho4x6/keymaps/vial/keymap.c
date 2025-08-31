@@ -157,8 +157,8 @@ const vial_tap_dance_entry_t default_tap_dance_entries[] = {
 #if VIAL_COMBO_ENTRIES > 0
 const vial_combo_entry_t PROGMEM default_combo_entries[] = {
     COMBO_ENTRY(KC_Q,  KC_W,  KC_NO, KC_NO, KC_TAB),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
+    COMBO_ENTRY(KC_BTN1, KC_BTN2, KC_NO, KC_NO, KC_BTN3),
+    COMBO_ENTRY(LGUI(KC_Z), LGUI(KC_X), KC_NO, KC_NO, SGUI(KC_Z)),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
