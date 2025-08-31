@@ -187,33 +187,44 @@ static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     return mul;
 }
 
-static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
+// 角度回転をQ10精度のまま保持してからスケーリング・量子化する版
+static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_left, uint8_t rot_idx) {
     int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
     int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
 
-    // 加速度の倍率（Q8）を計算（回転後の dx,dy を基に）
-    uint16_t mul_q8 = calc_accel_mul_q8(r->x, r->y);
+    // 元のセンサ値（int8）
+    int8_t ox = r->x, oy = r->y;
 
-    *xa += (int64_t)r->x * (int64_t)cpi * (int64_t)mul_q8;
-    *ya += (int64_t)r->y * (int64_t)cpi * (int64_t)mul_q8;
+    // Q10で回転（ここでは四捨五入せず精度維持）
+    int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
+    int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
 
-    // 符号付き四捨五入で出力値を算出（負方向の弱まりを防ぐ）
-    int64_t den = (int64_t)CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
-    int64_t rx = *xa;
-    int64_t ry = *ya;
-    rx += (rx >= 0 ? den / 2 : -den / 2);
-    ry += (ry >= 0 ? den / 2 : -den / 2);
-    int32_t ox = (int32_t)(rx / den);
-    int32_t oy = (int32_t)(ry / den);
-    if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
-    if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
+    // 加速度の倍率（Q8）を計算（速度評価は符号付き四捨五入した近似int8を用いる）
+    int8_t sx = (int8_t)((rx_q10 + (rx_q10 >= 0 ? 512 : -512)) >> 10);
+    int8_t sy = (int8_t)((ry_q10 + (ry_q10 >= 0 ? 512 : -512)) >> 10);
+    uint16_t mul_q8 = calc_accel_mul_q8(sx, sy);
 
-    r->x = (int8_t)ox; r->y = (int8_t)oy;
-    *xa -= (int64_t)ox * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
-    *ya -= (int64_t)oy * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
+    // 64bit蓄積（Q10精度を保ったまま）
+    *xa += (int64_t)rx_q10 * (int64_t)cpi * (int64_t)mul_q8;
+    *ya += (int64_t)ry_q10 * (int64_t)cpi * (int64_t)mul_q8;
 
-    // 残差を安全範囲にクリップ（暴走保険）
-    const int64_t bound = (int64_t)CPI_BASE * 512;
+    // 出力への変換：分母に Q10 を含めて符号付き四捨五入
+    int64_t den = (int64_t)CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8 * (int64_t)1024; // = 800 * 256 * 1024
+    int64_t ax = *xa;
+    int64_t ay = *ya;
+    ax += (ax >= 0 ? den / 2 : -den / 2);
+    ay += (ay >= 0 ? den / 2 : -den / 2);
+    int32_t ox_q = (int32_t)(ax / den);
+    int32_t oy_q = (int32_t)(ay / den);
+    if (ox_q > 127) ox_q = 127; else if (ox_q < -127) ox_q = -127;
+    if (oy_q > 127) oy_q = 127; else if (oy_q < -127) oy_q = -127;
+
+    r->x = (int8_t)ox_q; r->y = (int8_t)oy_q;
+    *xa -= (int64_t)ox_q * den;
+    *ya -= (int64_t)oy_q * den;
+
+    // 残差クリップ（暴走保険）
+    const int64_t bound = (int64_t)CPI_BASE * 512 * (int64_t)1024; // 元のboundにQ10係数を乗算
     if (*xa >  bound) { *xa =  bound; }
     if (*xa < -bound) { *xa = -bound; }
     if (*ya >  bound) { *ya =  bound; }
@@ -310,27 +321,27 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
 report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
     // 左
     {
-        int8_t x = left.x, y = left.y;
-        rotate_xy_idx(&x, &y, gL.rot_idx);
-        left.x = x; left.y = y;
-
         if (gL.scroll_mode) {
+            // スクロール時のみ従来どおり回転->1D化
+            int8_t x = left.x, y = left.y;
+            rotate_xy_idx(&x, &y, gL.rot_idx);
+            left.x = x; left.y = y;
             apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
         } else {
-            apply_move_scale(&left, kCpiList[gL.cpi_idx], true);
+            // カーソル移動は高精度回転経路で処理
+            apply_move_scale_precise(&left, kCpiList[gL.cpi_idx], true, gL.rot_idx);
         }
     }
 
     // 右
     {
-        int8_t x = right.x, y = right.y;
-        rotate_xy_idx(&x, &y, gR.rot_idx);
-        right.x = x; right.y = y;
-
         if (gR.scroll_mode) {
+            int8_t x = right.x, y = right.y;
+            rotate_xy_idx(&x, &y, gR.rot_idx);
+            right.x = x; right.y = y;
             apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
         } else {
-            apply_move_scale(&right, kCpiList[gR.cpi_idx], false);
+            apply_move_scale_precise(&right, kCpiList[gR.cpi_idx], false, gR.rot_idx);
         }
     }
 
