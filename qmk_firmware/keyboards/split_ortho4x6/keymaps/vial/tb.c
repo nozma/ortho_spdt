@@ -284,9 +284,19 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
         case TB_ACCEL_TOG:
             gAccelEnable ^= 1; tb_save(); tb_reset_acc(true, true); return false;
         case TB_ACCEL_UP:
-            if (gAccelGainIdx < kAccelGainMaxIdx) gAccelGainIdx++; tb_save(); tb_reset_acc(true, true); return false;
+            if (gAccelGainIdx < kAccelGainMaxIdx) {
+                gAccelGainIdx++;
+            }
+            tb_save();
+            tb_reset_acc(true, true);
+            return false;
         case TB_ACCEL_DOWN:
-            if (gAccelGainIdx > 0) gAccelGainIdx--; tb_save(); tb_reset_acc(true, true); return false;
+            if (gAccelGainIdx > 0) {
+                gAccelGainIdx--;
+            }
+            tb_save();
+            tb_reset_acc(true, true);
+            return false;
     }
     return true;
 }
