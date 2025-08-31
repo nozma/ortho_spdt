@@ -23,6 +23,8 @@ static const uint16_t ACCEL_MUL_MAX_Q8  = 1024;  // 4.0x 上限
 
 // 前方宣言（apply_scroll から使用）
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y);
+// Q10回転後の成分から連続値で加速係数を算出（左右別に平滑）
+static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool is_left);
 
 #define ROT_STEPS (ARRAY_SIZE(COS_Q10))
 // 「CPI」はここでは移動量のソフト倍率で再現
@@ -173,6 +175,9 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 
 // ==== 移動量のソフト倍率（左右別。64bit蓄積） ====================
 static int64_t x_acc_l=0, y_acc_l=0, x_acc_r=0, y_acc_r=0;
+// 加速用 速度平滑（Q10）
+static int32_t speed_q10_lp_l = 0;
+static int32_t speed_q10_lp_r = 0;
 
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
@@ -187,6 +192,28 @@ static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     return mul;
 }
 
+// 回転後Q10の速度から、連続しきい値＋ローパスで滑らかに加速係数を算出
+static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool is_left) {
+    if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
+    // L1ノルム（Q10）
+    int32_t s_q10 = abs(x_q10) + abs(y_q10);
+    // 簡易ローパス（alpha = 1/8）。左右別に状態を持つ
+    int32_t* plp = is_left ? &speed_q10_lp_l : &speed_q10_lp_r;
+    int32_t lp = *plp + ((s_q10 - *plp) >> 3);
+    *plp = lp;
+
+    // 連続しきい値: over_q10 = max(0, lp - thr<<10)
+    int32_t thr_q10 = ((int32_t)kAccelThreshold) << 10;
+    int32_t over_q10 = lp - thr_q10;
+    if (over_q10 <= 0) return ACCEL_MUL_BASE_Q8;
+
+    // add_q8 = (over_q10 * gain_q8) >> 10 （Q10→整数カウントへ変換しつつ連続化）
+    uint32_t add_q8 = ((uint64_t)(uint32_t)over_q10 * (uint32_t)kAccelGainQ8[gAccelGainIdx] + 512) >> 10;
+    uint32_t max_add = (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8);
+    if (add_q8 > max_add) add_q8 = max_add;
+    return (uint16_t)(ACCEL_MUL_BASE_Q8 + add_q8);
+}
+
 // 角度回転をQ10精度のまま保持してからスケーリング・量子化する版
 static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_left, uint8_t rot_idx) {
     int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
@@ -199,10 +226,8 @@ static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_le
     int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
     int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
 
-    // 加速度の倍率（Q8）を計算（速度評価は符号付き四捨五入した近似int8を用いる）
-    int8_t sx = (int8_t)((rx_q10 + (rx_q10 >= 0 ? 512 : -512)) >> 10);
-    int8_t sy = (int8_t)((ry_q10 + (ry_q10 >= 0 ? 512 : -512)) >> 10);
-    uint16_t mul_q8 = calc_accel_mul_q8(sx, sy);
+    // 加速度倍率（Q8）を計算：回転後のQ10で評価し、左右別ローパスで段差を低減
+    uint16_t mul_q8 = calc_accel_mul_q8_q10(rx_q10, ry_q10, is_left);
 
     // 64bit蓄積（Q10精度を保ったまま）
     *xa += (int64_t)rx_q10 * (int64_t)cpi * (int64_t)mul_q8;
