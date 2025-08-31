@@ -23,6 +23,8 @@ static const uint16_t ACCEL_MUL_MAX_Q8  = 1024;  // 4.0x 上限
 
 // 前方宣言（apply_scroll から使用）
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y);
+// Q10回転後の成分から連続値で加速係数を算出（左右別に平滑）
+static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool is_left);
 
 #define ROT_STEPS (ARRAY_SIZE(COS_Q10))
 // 「CPI」はここでは移動量のソフト倍率で再現
@@ -173,6 +175,9 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 
 // ==== 移動量のソフト倍率（左右別。64bit蓄積） ====================
 static int64_t x_acc_l=0, y_acc_l=0, x_acc_r=0, y_acc_r=0;
+// 加速用 速度平滑（Q10）
+static int32_t speed_q10_lp_l = 0;
+static int32_t speed_q10_lp_r = 0;
 
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
@@ -187,27 +192,66 @@ static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     return mul;
 }
 
-static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
+// 回転後Q10の速度から、連続しきい値＋ローパスで滑らかに加速係数を算出
+static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool is_left) {
+    if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
+    // L1ノルム（Q10）
+    int32_t s_q10 = abs(x_q10) + abs(y_q10);
+    // 簡易ローパス（alpha = 1/8）。左右別に状態を持つ
+    int32_t* plp = is_left ? &speed_q10_lp_l : &speed_q10_lp_r;
+    int32_t lp = *plp + ((s_q10 - *plp) >> 3);
+    *plp = lp;
+
+    // 連続しきい値: over_q10 = max(0, lp - thr<<10)
+    int32_t thr_q10 = ((int32_t)kAccelThreshold) << 10;
+    int32_t over_q10 = lp - thr_q10;
+    if (over_q10 <= 0) return ACCEL_MUL_BASE_Q8;
+
+    // add_q8 = (over_q10 * gain_q8) >> 10 （Q10→整数カウントへ変換しつつ連続化）
+    uint32_t add_q8 = ((uint64_t)(uint32_t)over_q10 * (uint32_t)kAccelGainQ8[gAccelGainIdx] + 512) >> 10;
+    uint32_t max_add = (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8);
+    if (add_q8 > max_add) add_q8 = max_add;
+    return (uint16_t)(ACCEL_MUL_BASE_Q8 + add_q8);
+}
+
+// 角度回転をQ10精度のまま保持してからスケーリング・量子化する版
+static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_left, uint8_t rot_idx) {
     int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
     int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
 
-    // 加速度の倍率（Q8）を計算（回転後の dx,dy を基に）
-    uint16_t mul_q8 = calc_accel_mul_q8(r->x, r->y);
+    // 元のセンサ値（int8）
+    int8_t ox = r->x, oy = r->y;
 
-    *xa += (int64_t)r->x * (int64_t)cpi * (int64_t)mul_q8;
-    *ya += (int64_t)r->y * (int64_t)cpi * (int64_t)mul_q8;
+    // Q10で回転（ここでは四捨五入せず精度維持）
+    int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
+    int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
 
-    int32_t ox = (int32_t)(*xa / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
-    int32_t oy = (int32_t)(*ya / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
-    if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
-    if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
+    // 加速度倍率（Q8）を計算：回転後のQ10で評価し、左右別ローパスで段差を低減
+    uint16_t mul_q8 = calc_accel_mul_q8_q10(rx_q10, ry_q10, is_left);
 
-    r->x = (int8_t)ox; r->y = (int8_t)oy;
-    *xa -= (int64_t)ox * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
-    *ya -= (int64_t)oy * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
+    // 64bit蓄積（Q10精度を保ったまま）
+    *xa += (int64_t)rx_q10 * (int64_t)cpi * (int64_t)mul_q8;
+    *ya += (int64_t)ry_q10 * (int64_t)cpi * (int64_t)mul_q8;
 
-    // 残差を安全範囲にクリップ（暴走保険）
-    const int64_t bound = (int64_t)CPI_BASE * 512;
+    // 出力への変換：分母に Q10 を含めて符号付き四捨五入
+    int64_t den = (int64_t)CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8 * (int64_t)1024; // = 800 * 256 * 1024
+    int64_t ax = *xa;
+    int64_t ay = *ya;
+    ax += (ax >= 0 ? den / 2 : -den / 2);
+    ay += (ay >= 0 ? den / 2 : -den / 2);
+    int32_t ox_q = (int32_t)(ax / den);
+    int32_t oy_q = (int32_t)(ay / den);
+    if (ox_q > 127) ox_q = 127; else if (ox_q < -127) ox_q = -127;
+    if (oy_q > 127) oy_q = 127; else if (oy_q < -127) oy_q = -127;
+
+    r->x = (int8_t)ox_q; r->y = (int8_t)oy_q;
+    *xa -= (int64_t)ox_q * den;
+    *ya -= (int64_t)oy_q * den;
+
+    // 残差クリップ（暴走保険）: 実運用で到達しない十分大きな範囲に拡大
+    // 小さすぎると長時間の連続移動や大きな円運動でクリップが発生し、
+    // 系統的なズレやカクつきの原因になるため、ここでは事実上無制限に近い値を採用
+    const int64_t bound = (int64_t)1 << 60; // ≒1.15e18
     if (*xa >  bound) { *xa =  bound; }
     if (*xa < -bound) { *xa = -bound; }
     if (*ya >  bound) { *ya =  bound; }
@@ -304,27 +348,27 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
 report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
     // 左
     {
-        int8_t x = left.x, y = left.y;
-        rotate_xy_idx(&x, &y, gL.rot_idx);
-        left.x = x; left.y = y;
-
         if (gL.scroll_mode) {
+            // スクロール時のみ従来どおり回転->1D化
+            int8_t x = left.x, y = left.y;
+            rotate_xy_idx(&x, &y, gL.rot_idx);
+            left.x = x; left.y = y;
             apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
         } else {
-            apply_move_scale(&left, kCpiList[gL.cpi_idx], true);
+            // カーソル移動は高精度回転経路で処理
+            apply_move_scale_precise(&left, kCpiList[gL.cpi_idx], true, gL.rot_idx);
         }
     }
 
     // 右
     {
-        int8_t x = right.x, y = right.y;
-        rotate_xy_idx(&x, &y, gR.rot_idx);
-        right.x = x; right.y = y;
-
         if (gR.scroll_mode) {
+            int8_t x = right.x, y = right.y;
+            rotate_xy_idx(&x, &y, gR.rot_idx);
+            right.x = x; right.y = y;
             apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
         } else {
-            apply_move_scale(&right, kCpiList[gR.cpi_idx], false);
+            apply_move_scale_precise(&right, kCpiList[gR.cpi_idx], false, gR.rot_idx);
         }
     }
 

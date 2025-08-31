@@ -169,15 +169,18 @@ uint16_t paw3222_get_cpi(void) {
 
 uint8_t read_pid_paw3222(void) { return paw3222_read_reg(REG_PID1); }
 
+// 注意: motionが無いフレームでは x/y を必ず0にリセットし、
+// 直前フレームのデルタが再利用されるのを防ぐ（累積ドリフト/ジャンプ対策）。
 report_mouse_t paw3222_get_report(report_mouse_t mouse_report) {
   report_paw3222_t data = paw3222_read();
+  // デフォルトは0（無入力）
+  mouse_report.x = 0;
+  mouse_report.y = 0;
   if (data.isMotion) {
     pd_dprintf("Raw ] X: %d, Y: %d\n", data.x, data.y);
-
     mouse_report.x = data.x;
     mouse_report.y = data.y;
   }
-
   return mouse_report;
 }
 
