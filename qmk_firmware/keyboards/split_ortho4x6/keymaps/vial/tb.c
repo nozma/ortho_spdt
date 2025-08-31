@@ -223,8 +223,10 @@ static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_le
     *xa -= (int64_t)ox_q * den;
     *ya -= (int64_t)oy_q * den;
 
-    // 残差クリップ（暴走保険）
-    const int64_t bound = (int64_t)CPI_BASE * 512 * (int64_t)1024; // 元のboundにQ10係数を乗算
+    // 残差クリップ（暴走保険）: 実運用で到達しない十分大きな範囲に拡大
+    // 小さすぎると長時間の連続移動や大きな円運動でクリップが発生し、
+    // 系統的なズレやカクつきの原因になるため、ここでは事実上無制限に近い値を採用
+    const int64_t bound = (int64_t)1 << 60; // ≒1.15e18
     if (*xa >  bound) { *xa =  bound; }
     if (*xa < -bound) { *xa = -bound; }
     if (*ya >  bound) { *ya =  bound; }
