@@ -1,0 +1,256 @@
+// keyboards/split_ortho4x6/keymaps/vial/tb.c
+#include "tb.h"
+#include "quantum.h"
+#include "pointing_device.h"
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdlib.h> // abs
+
+// ==== 可変パラメータ（必要に応じて調整） =========================
+static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
+// 回転角の順序（インデックス）: [-90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90]
+static const int16_t COS_Q10[] = {    0,  512,  724,  887,  990, 1024,  990,  887,  724,  512,    0};
+static const int16_t SIN_Q10[] = {-1024, -887, -724, -512, -259,    0,  259,  512,  724,  887, 1024};
+static const uint8_t kScrDivList[] = { 3, 4, 5, 6, 7, 8 }; // 2^div のシフト量（全体弱め）
+
+#define ROT_STEPS (ARRAY_SIZE(COS_Q10))
+// 「CPI」はここでは移動量のソフト倍率で再現
+#define CPI_BASE 800  // 800cpi を基準1.0として扱う
+
+// ==== EEPROM保存（左右まとめて 32bit にパック） ==================
+typedef struct {
+    uint8_t cpi_idx;     // 0..15
+    uint8_t rot_idx;     // 0..ROT_STEPS-1
+    uint8_t scr_div_idx; // 0..7
+    bool    scr_invert;  // 0/1
+    bool    scroll_mode; // 0:cursor 1:scroll
+} side_cfg_t;
+
+static side_cfg_t gL, gR;
+
+static inline uint32_t pack_cfg(void) {
+    uint32_t v = 0;
+    v |= (uint32_t)(gL.cpi_idx     & 0xF)      << 0;
+    v |= (uint32_t)(gL.rot_idx     & 0xF)      << 4;
+    v |= (uint32_t)(gL.scr_div_idx & 0x7)      << 8;
+    v |= (uint32_t)(gL.scr_invert  ? 1 : 0)    << 11;
+    v |= (uint32_t)(gL.scroll_mode ? 1 : 0)    << 12;
+
+    v |= (uint32_t)(gR.cpi_idx     & 0xF)      << 13;
+    v |= (uint32_t)(gR.rot_idx     & 0xF)      << 17;
+    v |= (uint32_t)(gR.scr_div_idx & 0x7)      << 21;
+    v |= (uint32_t)(gR.scr_invert  ? 1 : 0)    << 24;
+    v |= (uint32_t)(gR.scroll_mode ? 1 : 0)    << 25;
+    return v;
+}
+
+static inline void unpack_cfg(uint32_t v) {
+    gL.cpi_idx     = (v >> 0)  & 0xF;
+    gL.rot_idx     = (v >> 4)  & 0xF;
+    gL.scr_div_idx = (v >> 8)  & 0x7;
+    gL.scr_invert  = ((v >> 11) & 1) != 0;
+    gL.scroll_mode = ((v >> 12) & 1) != 0;
+
+    gR.cpi_idx     = (v >> 13) & 0xF;
+    gR.rot_idx     = (v >> 17) & 0xF;
+    gR.scr_div_idx = (v >> 21) & 0x7;
+    gR.scr_invert  = ((v >> 24) & 1) != 0;
+    gR.scroll_mode = ((v >> 25) & 1) != 0;
+}
+
+static void tb_eeprom_defaults(void) {
+    // 左
+    gL.cpi_idx     = 2;   // 800cpi
+    gL.rot_idx     = 5;   // 0°
+    gL.scr_div_idx = 5;   // スクロール弱め
+    gL.scr_invert  = false;
+    gL.scroll_mode = true;
+
+    // 右
+    gR.cpi_idx     = 2;   // 800cpi
+    gR.rot_idx     = 5;   // 0°
+    gR.scr_div_idx = 3;
+    gR.scr_invert  = false;
+    gR.scroll_mode = false;
+}
+
+static void tb_load_eeprom(void) {
+    uint32_t raw = eeconfig_read_kb();
+    unpack_cfg(raw);
+
+    bool bad =
+        gL.cpi_idx     >= ARRAY_SIZE(kCpiList)   ||
+        gL.rot_idx     >= ROT_STEPS              ||
+        gL.scr_div_idx >= ARRAY_SIZE(kScrDivList)||
+        gR.cpi_idx     >= ARRAY_SIZE(kCpiList)   ||
+        gR.rot_idx     >= ROT_STEPS              ||
+        gR.scr_div_idx >= ARRAY_SIZE(kScrDivList);
+
+    if (bad) {
+        tb_eeprom_defaults();
+        eeconfig_update_kb(pack_cfg());
+    }
+}
+
+static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
+
+// ==== 回転（固定小数点 Q10） ======================================
+static inline void rotate_xy_idx(int8_t* x, int8_t* y, uint8_t idx) {
+    int8_t  ox = *x, oy = *y;
+    int32_t rx = (int32_t)ox * COS_Q10[idx] - (int32_t)oy * SIN_Q10[idx];
+    int32_t ry = (int32_t)ox * SIN_Q10[idx] + (int32_t)oy * COS_Q10[idx];
+    rx += (rx >= 0 ? 512 : -512); ry += (ry >= 0 ? 512 : -512); // 四捨五入
+    rx >>= 10; ry >>= 10;
+    if (rx > 127) rx = 127; else if (rx < -127) rx = -127;
+    if (ry > 127) ry = 127; else if (ry < -127) ry = -127;
+    *x = (int8_t)rx; *y = (int8_t)ry;
+}
+
+// ==== スクロール変換（左右別の蓄積） ==============================
+static int v_acc_l = 0, h_acc_l = 0;
+static int v_acc_r = 0, h_acc_r = 0;
+
+static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bool is_left) {
+    int *v_acc = is_left ? &v_acc_l : &v_acc_r;
+    int *h_acc = is_left ? &h_acc_l : &h_acc_r;
+
+    int8_t x = r->x, y = r->y;
+    // どちらかを0にして1D寄せ
+    if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
+
+    if (invert) { x = -x; y = -y; }
+
+    uint8_t div = kScrDivList[scr_div_idx];
+    *h_acc += x; *v_acc += y;
+
+    int8_t hs = (int8_t)(*h_acc >> div);
+    int8_t vs = (int8_t)(*v_acc >> div);
+
+    if (hs) { r->h += hs; *h_acc -= (hs << div); }
+    if (vs) { r->v += vs; *v_acc -= (vs << div); }
+
+    // スクロール時はXYを出さない
+    r->x = 0;
+    r->y = 0;
+}
+
+// ==== 移動量のソフト倍率（左右別。64bit蓄積） ====================
+static int64_t x_acc_l=0, y_acc_l=0, x_acc_r=0, y_acc_r=0;
+
+static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
+    int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
+    int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
+
+    *xa += (int64_t)r->x * (int64_t)cpi;
+    *ya += (int64_t)r->y * (int64_t)cpi;
+
+    int32_t ox = (int32_t)(*xa / CPI_BASE);
+    int32_t oy = (int32_t)(*ya / CPI_BASE);
+    if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
+    if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
+
+    r->x = (int8_t)ox; r->y = (int8_t)oy;
+    *xa -= (int64_t)ox * CPI_BASE;
+    *ya -= (int64_t)oy * CPI_BASE;
+
+    // 残差を安全範囲にクリップ（暴走保険）
+    const int64_t bound = (int64_t)CPI_BASE * 512;
+    if (*xa >  bound) { *xa =  bound; }
+    if (*xa < -bound) { *xa = -bound; }
+    if (*ya >  bound) { *ya =  bound; }
+    if (*ya < -bound) { *ya = -bound; }
+}
+
+// ==== 残差リセット（設定変更時の引っかかり低減） ==================
+static inline void tb_reset_acc(bool left, bool right) {
+    if (left)  { x_acc_l = y_acc_l = 0; v_acc_l = h_acc_l = 0; }
+    if (right) { x_acc_r = y_acc_r = 0; v_acc_r = h_acc_r = 0; }
+}
+
+// ==== カスタムキーコード ==========================================
+// QK_KB_0 起点（vial.json の customKeycodes の並びと一致させる）
+enum custom_keycodes {
+    TB_L_CPI_NEXT = QK_KB_0, TB_L_CPI_PREV,
+    TB_L_ROT_NEXT, TB_L_ROT_PREV,
+    TB_L_SCR_TOG,  TB_L_SCR_DIV,
+    TB_L_SCR_INV,
+
+    TB_R_CPI_NEXT, TB_R_CPI_PREV,
+    TB_R_ROT_NEXT, TB_R_ROT_PREV,
+    TB_R_SCR_TOG,  TB_R_SCR_DIV,
+    TB_R_SCR_INV,
+};
+
+// ==== 公開API（tb.h） =============================================
+void tb_init(void) {
+    tb_load_eeprom();
+}
+
+bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
+    if (!record->event.pressed) return true;
+
+    switch (keycode) {
+        // 左
+        case TB_L_CPI_NEXT:
+            gL.cpi_idx = (gL.cpi_idx + 1) % ARRAY_SIZE(kCpiList); tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_CPI_PREV:
+            gL.cpi_idx = (gL.cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList); tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_ROT_NEXT:
+            gL.rot_idx = (gL.rot_idx + 1) % ROT_STEPS; tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_ROT_PREV:
+            gL.rot_idx = (gL.rot_idx + ROT_STEPS - 1) % ROT_STEPS; tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_SCR_TOG:
+            gL.scroll_mode ^= 1; tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_SCR_DIV:
+            gL.scr_div_idx = (gL.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_SCR_INV:
+            gL.scr_invert ^= 1; tb_save(); tb_reset_acc(true, false); return false;
+
+        // 右
+        case TB_R_CPI_NEXT:
+            gR.cpi_idx = (gR.cpi_idx + 1) % ARRAY_SIZE(kCpiList); tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_CPI_PREV:
+            gR.cpi_idx = (gR.cpi_idx + ARRAY_SIZE(kCpiList) - 1) % ARRAY_SIZE(kCpiList); tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_ROT_NEXT:
+            gR.rot_idx = (gR.rot_idx + 1) % ROT_STEPS; tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_ROT_PREV:
+            gR.rot_idx = (gR.rot_idx + ROT_STEPS - 1) % ROT_STEPS; tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_SCR_TOG:
+            gR.scroll_mode ^= 1; tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_SCR_DIV:
+            gR.scr_div_idx = (gR.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_SCR_INV:
+            gR.scr_invert ^= 1; tb_save(); tb_reset_acc(false, true); return false;
+    }
+    return true;
+}
+
+report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
+    // 左
+    {
+        int8_t x = left.x, y = left.y;
+        rotate_xy_idx(&x, &y, gL.rot_idx);
+        left.x = x; left.y = y;
+
+        if (gL.scroll_mode) {
+            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
+        } else {
+            apply_move_scale(&left, kCpiList[gL.cpi_idx], true);
+        }
+    }
+
+    // 右
+    {
+        int8_t x = right.x, y = right.y;
+        rotate_xy_idx(&x, &y, gR.rot_idx);
+        right.x = x; right.y = y;
+
+        if (gR.scroll_mode) {
+            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
+        } else {
+            apply_move_scale(&right, kCpiList[gR.cpi_idx], false);
+        }
+    }
+
+    return pointing_device_combine_reports(left, right);
+}
