@@ -20,8 +20,8 @@
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [0] = LAYOUT(
                 /* 左手側 */
-                   KC_Q,            KC_W,            KC_E,            KC_R,            KC_T,                QK_BOOT,      
-                   LT(3,KC_A),      KC_S,            KC_D,            KC_F,            KC_G,                KC_NO,
+                   KC_Q,            KC_W,            KC_E,            KC_R,            KC_T,                LGUI(KC_KP_PLUS),      
+                   LT(3,KC_A),      KC_S,            KC_D,            KC_F,            KC_G,                LGUI(KC_KP_MINUS),
                    LSFT_T(KC_Z),    KC_X,            KC_C,            KC_V,            KC_B,     
                    KC_LEFT_GUI,                                       KC_LEFT_ALT,     LT(1,KC_LANGUAGE_2), LT(5,KC_ENTER),        
                 /* 右手側 */
@@ -159,7 +159,7 @@ const vial_combo_entry_t PROGMEM default_combo_entries[] = {
     COMBO_ENTRY(KC_Q,  KC_W,  KC_NO, KC_NO, KC_TAB),
     COMBO_ENTRY(KC_BTN1, KC_BTN2, KC_NO, KC_NO, KC_BTN3),
     COMBO_ENTRY(LGUI(KC_Z), LGUI(KC_X), KC_NO, KC_NO, SGUI(KC_Z)),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
+    COMBO_ENTRY(LGUI(KC_KP_PLUS), LGUI(KC_KP_MINUS), KC_NO, KC_NO, LGUI(KC_KP_0)),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
