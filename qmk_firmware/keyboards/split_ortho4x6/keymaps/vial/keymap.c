@@ -20,17 +20,17 @@
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [0] = LAYOUT(
                 /* 左手側 */
-                   KC_Q,            KC_W,            KC_E,            KC_R,            KC_T,                QK_BOOT,      
-                   LT(3,KC_A),      KC_S,            KC_D,            KC_F,            KC_G,                KC_NO,
+                   KC_Q,            KC_W,            KC_E,            KC_R,            KC_T,                LGUI(KC_KP_PLUS),      
+                   LT(3,KC_A),      KC_S,            KC_D,            KC_F,            KC_G,                LGUI(KC_KP_MINUS),
                    LSFT_T(KC_Z),    KC_X,            KC_C,            KC_V,            KC_B,     
                    KC_LEFT_GUI,                                       KC_LEFT_ALT,     LT(1,KC_LANGUAGE_2), LT(5,KC_ENTER),        
                 /* 右手側 */
                 QK_BOOT,            
                    KC_Y,            KC_U,            KC_I,            KC_O,            KC_P,  
-                KC_NO,
-                   KC_H,            KC_J,            KC_K,            LT(4,KC_L),      KC_SEMICOLON,            
+                KC_F12,
+                   KC_H,            KC_J,            KC_K,            LT(4,KC_L),      LT(4,KC_SEMICOLON),            
                    KC_N,            KC_M,            KC_COMMA,        KC_DOT,          RSFT_T(KC_SLASH),  
-                   LT(6,KC_SPACE),     LT(2,KC_LANGUAGE_1),                            KC_ESCAPE
+                   LT(6,KC_SPACE),     LT(2,KC_LANGUAGE_1),                            LCTL(LGUI(LSFT(KC_4))) 
     ),
     [1] = LAYOUT(
                 /* 左手側 */
@@ -48,13 +48,13 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     ),
     [2] = LAYOUT(
                 /* 左手側 */
-                   KC_1,            KC_KP_2,         KC_KP_3,         KC_KP_4,         KC_KP_5,              KC_TRANSPARENT,
+                   KC_1,            KC_2,            KC_3,            KC_4,            KC_5,              KC_TRANSPARENT,
                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,       KC_TRANSPARENT,
                    KC_LEFT_SHIFT,   KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  
                    KC_TRANSPARENT,                                    KC_TRANSPARENT,  KC_TRANSPARENT,       KC_TRANSPARENT, 
                 /* 右手側 */
                 KC_TRANSPARENT,     
-                   KC_KP_6,         KC_KP_7,         KC_KP_8,         KC_KP_9,         KC_KP_0,  
+                   KC_6,            KC_7,            KC_8,           KC_9,             KC_0,  
                 KC_TRANSPARENT,
                    KC_LEFT,         KC_DOWN,           KC_UP,        KC_RIGHT,         KC_TRANSPARENT,  
                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT, KC_TRANSPARENT,   KC_RIGHT_SHIFT,  
@@ -157,9 +157,9 @@ const vial_tap_dance_entry_t default_tap_dance_entries[] = {
 #if VIAL_COMBO_ENTRIES > 0
 const vial_combo_entry_t PROGMEM default_combo_entries[] = {
     COMBO_ENTRY(KC_Q,  KC_W,  KC_NO, KC_NO, KC_TAB),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
-    COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
+    COMBO_ENTRY(KC_BTN1, KC_BTN2, KC_NO, KC_NO, KC_BTN3),
+    COMBO_ENTRY(LGUI(KC_Z), LGUI(KC_X), KC_NO, KC_NO, SGUI(KC_Z)),
+    COMBO_ENTRY(LGUI(KC_KP_PLUS), LGUI(KC_KP_MINUS), KC_NO, KC_NO, LGUI(KC_KP_0)),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
     COMBO_ENTRY(KC_NO, KC_NO, KC_NO, KC_NO, KC_NO),
