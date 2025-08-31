@@ -197,8 +197,14 @@ static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
     *xa += (int64_t)r->x * (int64_t)cpi * (int64_t)mul_q8;
     *ya += (int64_t)r->y * (int64_t)cpi * (int64_t)mul_q8;
 
-    int32_t ox = (int32_t)(*xa / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
-    int32_t oy = (int32_t)(*ya / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
+    // 符号付き四捨五入で出力値を算出（負方向の弱まりを防ぐ）
+    int64_t den = (int64_t)CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
+    int64_t rx = *xa;
+    int64_t ry = *ya;
+    rx += (rx >= 0 ? den / 2 : -den / 2);
+    ry += (ry >= 0 ? den / 2 : -den / 2);
+    int32_t ox = (int32_t)(rx / den);
+    int32_t oy = (int32_t)(ry / den);
     if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
     if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
 
