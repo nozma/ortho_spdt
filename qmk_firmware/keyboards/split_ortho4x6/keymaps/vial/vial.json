@@ -200,6 +200,21 @@
             "name": "Trackball Right",
             "title": "右: スクロール反転",
             "shortName": "R SINV"
+        },
+        {
+            "name": "Trackball Accel",
+            "title": "加速度: トグル",
+            "shortName": "ACC TOG"
+        },
+        {
+            "name": "Trackball Accel",
+            "title": "加速度: 強く",
+            "shortName": "ACC +"
+        },
+        {
+            "name": "Trackball Accel",
+            "title": "加速度: 弱く",
+            "shortName": "ACC -"
         }
     ]
 }

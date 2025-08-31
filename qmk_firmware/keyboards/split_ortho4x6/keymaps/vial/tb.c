@@ -13,6 +13,17 @@ static const int16_t COS_Q10[] = {    0,  512,  724,  887,  990, 1024,  990,  88
 static const int16_t SIN_Q10[] = {-1024, -887, -724, -512, -259,    0,  259,  512,  724,  887, 1024};
 static const uint8_t kScrDivList[] = { 3, 4, 5, 6, 7, 8 }; // 2^div のシフト量（全体弱め）
 
+// 加速度（カーソル加速）関連：Q8 係数（256 = 1.0）
+// gain は『(speed - thr) * gain / 256』を加算する傾き。大きいほど強い。
+static const uint16_t kAccelGainQ8[] = { 0, 16, 24, 32, 40, 48, 64, 80 };
+static const uint8_t  kAccelGainMaxIdx = (ARRAY_SIZE(kAccelGainQ8) - 1);
+static const uint8_t  kAccelThreshold = 4;       // この合計移動（|dx|+|dy|）を超えると加速
+static const uint16_t ACCEL_MUL_BASE_Q8 = 256;   // 1.0x
+static const uint16_t ACCEL_MUL_MAX_Q8  = 1024;  // 4.0x 上限
+
+// 前方宣言（apply_scroll から使用）
+static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y);
+
 #define ROT_STEPS (ARRAY_SIZE(COS_Q10))
 // 「CPI」はここでは移動量のソフト倍率で再現
 #define CPI_BASE 800  // 800cpi を基準1.0として扱う
@@ -28,6 +39,10 @@ typedef struct {
 
 static side_cfg_t gL, gR;
 
+// 共有（左右で共通）設定：カーソル加速度
+static bool    gAccelEnable = false;
+static uint8_t gAccelGainIdx = 0; // 0..kAccelGainMaxIdx
+
 static inline uint32_t pack_cfg(void) {
     uint32_t v = 0;
     v |= (uint32_t)(gL.cpi_idx     & 0xF)      << 0;
@@ -41,6 +56,10 @@ static inline uint32_t pack_cfg(void) {
     v |= (uint32_t)(gR.scr_div_idx & 0x7)      << 21;
     v |= (uint32_t)(gR.scr_invert  ? 1 : 0)    << 24;
     v |= (uint32_t)(gR.scroll_mode ? 1 : 0)    << 25;
+
+    // 共有設定（残りビットの中でパック）
+    v |= (uint32_t)(gAccelEnable ? 1 : 0)      << 26;           // bit26
+    v |= (uint32_t)(gAccelGainIdx & 0x7)       << 27;           // bit27..29
     return v;
 }
 
@@ -56,6 +75,9 @@ static inline void unpack_cfg(uint32_t v) {
     gR.scr_div_idx = (v >> 21) & 0x7;
     gR.scr_invert  = ((v >> 24) & 1) != 0;
     gR.scroll_mode = ((v >> 25) & 1) != 0;
+
+    gAccelEnable   = ((v >> 26) & 1) != 0;
+    gAccelGainIdx  = (v >> 27) & 0x7;
 }
 
 static void tb_eeprom_defaults(void) {
@@ -72,6 +94,10 @@ static void tb_eeprom_defaults(void) {
     gR.scr_div_idx = 3;
     gR.scr_invert  = false;
     gR.scroll_mode = false;
+
+    // 共有
+    gAccelEnable   = false; // 既定はOFF
+    gAccelGainIdx  = 3;     // ほどほど（32）
 }
 
 static void tb_load_eeprom(void) {
@@ -84,7 +110,8 @@ static void tb_load_eeprom(void) {
         gL.scr_div_idx >= ARRAY_SIZE(kScrDivList)||
         gR.cpi_idx     >= ARRAY_SIZE(kCpiList)   ||
         gR.rot_idx     >= ROT_STEPS              ||
-        gR.scr_div_idx >= ARRAY_SIZE(kScrDivList);
+        gR.scr_div_idx >= ARRAY_SIZE(kScrDivList) ||
+        gAccelGainIdx  >  kAccelGainMaxIdx;
 
     if (bad) {
         tb_eeprom_defaults();
@@ -115,13 +142,23 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
     int8_t x = r->x, y = r->y;
+    int8_t ox = x, oy = y; // 速度評価用に原値を保持
     // どちらかを0にして1D寄せ
     if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
 
     if (invert) { x = -x; y = -y; }
 
+    // 加速度倍率（Q8）
+    uint16_t mul_q8 = calc_accel_mul_q8(ox, oy);
+    // 近似的な四捨五入付きスケーリング
+    int32_t sx = (int32_t)x * (int32_t)mul_q8;
+    int32_t sy = (int32_t)y * (int32_t)mul_q8;
+    if (sx >= 0) sx += ACCEL_MUL_BASE_Q8 / 2; else sx -= ACCEL_MUL_BASE_Q8 / 2;
+    if (sy >= 0) sy += ACCEL_MUL_BASE_Q8 / 2; else sy -= ACCEL_MUL_BASE_Q8 / 2;
+    sx /= ACCEL_MUL_BASE_Q8; sy /= ACCEL_MUL_BASE_Q8;
+
     uint8_t div = kScrDivList[scr_div_idx];
-    *h_acc += x; *v_acc += y;
+    *h_acc += (int)sx; *v_acc += (int)sy;
 
     int8_t hs = (int8_t)(*h_acc >> div);
     int8_t vs = (int8_t)(*v_acc >> div);
@@ -137,21 +174,37 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 // ==== 移動量のソフト倍率（左右別。64bit蓄積） ====================
 static int64_t x_acc_l=0, y_acc_l=0, x_acc_r=0, y_acc_r=0;
 
+static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
+    if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
+    uint16_t mul = ACCEL_MUL_BASE_Q8;
+    uint16_t speed = (uint16_t)abs((int)x) + (uint16_t)abs((int)y);
+    if (speed > kAccelThreshold) {
+        uint16_t over = speed - kAccelThreshold;
+        uint32_t add  = (uint32_t)over * (uint32_t)kAccelGainQ8[gAccelGainIdx];
+        mul += (uint16_t)MIN(add, (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8));
+        if (mul > ACCEL_MUL_MAX_Q8) mul = ACCEL_MUL_MAX_Q8;
+    }
+    return mul;
+}
+
 static void apply_move_scale(report_mouse_t* r, uint16_t cpi, bool is_left) {
     int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
     int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
 
-    *xa += (int64_t)r->x * (int64_t)cpi;
-    *ya += (int64_t)r->y * (int64_t)cpi;
+    // 加速度の倍率（Q8）を計算（回転後の dx,dy を基に）
+    uint16_t mul_q8 = calc_accel_mul_q8(r->x, r->y);
 
-    int32_t ox = (int32_t)(*xa / CPI_BASE);
-    int32_t oy = (int32_t)(*ya / CPI_BASE);
+    *xa += (int64_t)r->x * (int64_t)cpi * (int64_t)mul_q8;
+    *ya += (int64_t)r->y * (int64_t)cpi * (int64_t)mul_q8;
+
+    int32_t ox = (int32_t)(*xa / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
+    int32_t oy = (int32_t)(*ya / (CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8));
     if (ox > 127) ox = 127; else if (ox < -127) ox = -127;
     if (oy > 127) oy = 127; else if (oy < -127) oy = -127;
 
     r->x = (int8_t)ox; r->y = (int8_t)oy;
-    *xa -= (int64_t)ox * CPI_BASE;
-    *ya -= (int64_t)oy * CPI_BASE;
+    *xa -= (int64_t)ox * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
+    *ya -= (int64_t)oy * CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8;
 
     // 残差を安全範囲にクリップ（暴走保険）
     const int64_t bound = (int64_t)CPI_BASE * 512;
@@ -179,6 +232,11 @@ enum custom_keycodes {
     TB_R_ROT_NEXT, TB_R_ROT_PREV,
     TB_R_SCR_TOG,  TB_R_SCR_DIV,
     TB_R_SCR_INV,
+
+    // 共有（カーソル加速度）
+    TB_ACCEL_TOG,  // 有効/無効
+    TB_ACCEL_UP,   // 強く
+    TB_ACCEL_DOWN, // 弱く
 };
 
 // ==== 公開API（tb.h） =============================================
@@ -221,6 +279,14 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
             gR.scr_div_idx = (gR.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); tb_reset_acc(false, true); return false;
         case TB_R_SCR_INV:
             gR.scr_invert ^= 1; tb_save(); tb_reset_acc(false, true); return false;
+
+        // 共有（加速度）
+        case TB_ACCEL_TOG:
+            gAccelEnable ^= 1; tb_save(); tb_reset_acc(true, true); return false;
+        case TB_ACCEL_UP:
+            if (gAccelGainIdx < kAccelGainMaxIdx) gAccelGainIdx++; tb_save(); tb_reset_acc(true, true); return false;
+        case TB_ACCEL_DOWN:
+            if (gAccelGainIdx > 0) gAccelGainIdx--; tb_save(); tb_reset_acc(true, true); return false;
     }
     return true;
 }
