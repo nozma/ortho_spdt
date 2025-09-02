@@ -36,6 +36,7 @@ typedef struct {
     uint8_t rot_idx;     // 0..ROT_STEPS-1
     uint8_t scr_div_idx; // 0..7
     bool    scr_invert;  // 0/1
+    bool    scr_h_invert;// 0/1 (horizontal only)
     bool    scroll_mode; // 0:cursor 1:scroll
 } side_cfg_t;
 
@@ -62,24 +63,29 @@ static inline uint32_t pack_cfg(void) {
     // 共有設定（残りビットの中でパック）
     v |= (uint32_t)(gAccelEnable ? 1 : 0)      << 26;           // bit26
     v |= (uint32_t)(gAccelGainIdx & 0x7)       << 27;           // bit27..29
+    // 残り2bitを水平反転フラグに割り当て
+    v |= (uint32_t)(gL.scr_h_invert ? 1 : 0)   << 30;           // bit30
+    v |= (uint32_t)(gR.scr_h_invert ? 1 : 0)   << 31;           // bit31
     return v;
 }
 
 static inline void unpack_cfg(uint32_t v) {
-    gL.cpi_idx     = (v >> 0)  & 0xF;
-    gL.rot_idx     = (v >> 4)  & 0xF;
-    gL.scr_div_idx = (v >> 8)  & 0x7;
-    gL.scr_invert  = ((v >> 11) & 1) != 0;
-    gL.scroll_mode = ((v >> 12) & 1) != 0;
+    gL.cpi_idx      = (v >> 0)  & 0xF;
+    gL.rot_idx      = (v >> 4)  & 0xF;
+    gL.scr_div_idx  = (v >> 8)  & 0x7;
+    gL.scr_invert   = ((v >> 11) & 1) != 0;
+    gL.scroll_mode  = ((v >> 12) & 1) != 0;
 
-    gR.cpi_idx     = (v >> 13) & 0xF;
-    gR.rot_idx     = (v >> 17) & 0xF;
-    gR.scr_div_idx = (v >> 21) & 0x7;
-    gR.scr_invert  = ((v >> 24) & 1) != 0;
-    gR.scroll_mode = ((v >> 25) & 1) != 0;
+    gR.cpi_idx      = (v >> 13) & 0xF;
+    gR.rot_idx      = (v >> 17) & 0xF;
+    gR.scr_div_idx  = (v >> 21) & 0x7;
+    gR.scr_invert   = ((v >> 24) & 1) != 0;
+    gR.scroll_mode  = ((v >> 25) & 1) != 0;
 
-    gAccelEnable   = ((v >> 26) & 1) != 0;
-    gAccelGainIdx  = (v >> 27) & 0x7;
+    gAccelEnable    = ((v >> 26) & 1) != 0;
+    gAccelGainIdx   = (v >> 27) & 0x7;
+    gL.scr_h_invert = ((v >> 30) & 1) != 0;
+    gR.scr_h_invert = ((v >> 31) & 1) != 0;
 }
 
 static void tb_eeprom_defaults(void) {
@@ -88,6 +94,7 @@ static void tb_eeprom_defaults(void) {
     gL.rot_idx     = 5;   // 0°
     gL.scr_div_idx = 5;   // スクロール弱め
     gL.scr_invert  = false;
+    gL.scr_h_invert= false; // デフォルト: 水平は反転しない
     gL.scroll_mode = true;
 
     // 右
@@ -95,6 +102,7 @@ static void tb_eeprom_defaults(void) {
     gR.rot_idx     = 5;   // 0°
     gR.scr_div_idx = 3;
     gR.scr_invert  = false;
+    gR.scr_h_invert= false; // デフォルト: 水平は反転しない
     gR.scroll_mode = false;
 
     // 共有
@@ -139,7 +147,7 @@ static inline void rotate_xy_idx(int8_t* x, int8_t* y, uint8_t idx) {
 static int v_acc_l = 0, h_acc_l = 0;
 static int v_acc_r = 0, h_acc_r = 0;
 
-static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bool is_left) {
+static void apply_scroll(report_mouse_t* r, bool invert_v, bool invert_h, uint8_t scr_div_idx, bool is_left) {
     int *v_acc = is_left ? &v_acc_l : &v_acc_r;
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
@@ -148,7 +156,9 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     // どちらかを0にして1D寄せ
     if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
 
-    if (invert) { x = -x; y = -y; }
+    // 反転適用（縦は invert_v、横は invert_h）
+    if (invert_v) { y = -y; }
+    if (invert_h) { x = -x; }
 
     // 加速度倍率（Q8）
     uint16_t mul_q8 = calc_accel_mul_q8(ox, oy);
@@ -271,11 +281,13 @@ enum custom_keycodes {
     TB_L_ROT_NEXT, TB_L_ROT_PREV,
     TB_L_SCR_TOG,  TB_L_SCR_DIV,
     TB_L_SCR_INV,
+    TB_L_SCR_HINV,
 
     TB_R_CPI_NEXT, TB_R_CPI_PREV,
     TB_R_ROT_NEXT, TB_R_ROT_PREV,
     TB_R_SCR_TOG,  TB_R_SCR_DIV,
     TB_R_SCR_INV,
+    TB_R_SCR_HINV,
 
     // 共有（カーソル加速度）
     TB_ACCEL_TOG,  // 有効/無効
@@ -307,6 +319,8 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
             gL.scr_div_idx = (gL.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); tb_reset_acc(true, false); return false;
         case TB_L_SCR_INV:
             gL.scr_invert ^= 1; tb_save(); tb_reset_acc(true, false); return false;
+        case TB_L_SCR_HINV:
+            gL.scr_h_invert ^= 1; tb_save(); tb_reset_acc(true, false); return false;
 
         // 右
         case TB_R_CPI_NEXT:
@@ -323,6 +337,8 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
             gR.scr_div_idx = (gR.scr_div_idx + 1) % ARRAY_SIZE(kScrDivList); tb_save(); tb_reset_acc(false, true); return false;
         case TB_R_SCR_INV:
             gR.scr_invert ^= 1; tb_save(); tb_reset_acc(false, true); return false;
+        case TB_R_SCR_HINV:
+            gR.scr_h_invert ^= 1; tb_save(); tb_reset_acc(false, true); return false;
 
         // 共有（加速度）
         case TB_ACCEL_TOG:
@@ -353,7 +369,7 @@ report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
             int8_t x = left.x, y = left.y;
             rotate_xy_idx(&x, &y, gL.rot_idx);
             left.x = x; left.y = y;
-            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
+            apply_scroll(&left, gL.scr_invert, gL.scr_h_invert, gL.scr_div_idx, true);
         } else {
             // カーソル移動は高精度回転経路で処理
             apply_move_scale_precise(&left, kCpiList[gL.cpi_idx], true, gL.rot_idx);
@@ -366,7 +382,7 @@ report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
             int8_t x = right.x, y = right.y;
             rotate_xy_idx(&x, &y, gR.rot_idx);
             right.x = x; right.y = y;
-            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
+            apply_scroll(&right, gR.scr_invert, gR.scr_h_invert, gR.scr_div_idx, false);
         } else {
             apply_move_scale_precise(&right, kCpiList[gR.cpi_idx], false, gR.rot_idx);
         }
