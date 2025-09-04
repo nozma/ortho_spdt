@@ -56,7 +56,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
                 KC_TRANSPARENT,     
                    KC_6,            KC_7,            KC_8,           KC_9,             KC_0,  
                 KC_TRANSPARENT,
-                   KC_LEFT,         KC_DOWN,           KC_UP,        KC_RIGHT,         KC_TRANSPARENT,  
+                   KC_LEFT,         KC_DOWN,           KC_UP,        KC_RIGHT,         KC_QUOTE,  
                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT, KC_TRANSPARENT,   KC_RIGHT_SHIFT,  
                    KC_TRANSPARENT,  KC_TRANSPARENT,                                    KC_TRANSPARENT
     ),
