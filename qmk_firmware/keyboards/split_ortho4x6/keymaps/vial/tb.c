@@ -6,13 +6,6 @@
 #include <stdbool.h>
 #include <stdlib.h> // abs
 
-// 出力レンジ（通常8bit, 拡張時16bit）
-#ifdef MOUSE_EXTENDED_REPORT
-#   define TB_XY_MAX 32767
-#else
-#   define TB_XY_MAX 127
-#endif
-
 // ==== 可変パラメータ（必要に応じて調整） =========================
 static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 // 回転角の順序（インデックス）: [-90, -60, -45, -30, -15, 0, 15, 30, 45, 60, 90]
@@ -174,27 +167,11 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     uint8_t div = kScrDivList[scr_div_idx];
     *h_acc += (int)sx; *v_acc += (int)sy;
 
-    int32_t hs = (int32_t)(*h_acc >> div);
-    int32_t vs = (int32_t)(*v_acc >> div);
+    int8_t hs = (int8_t)(*h_acc >> div);
+    int8_t vs = (int8_t)(*v_acc >> div);
 
-    if (hs) {
-        if (hs > TB_XY_MAX) hs = TB_XY_MAX; else if (hs < -TB_XY_MAX) hs = -TB_XY_MAX;
-#ifdef WHEEL_EXTENDED_REPORT
-        r->h += (int16_t)hs;
-#else
-        r->h += (int8_t)hs;
-#endif
-        *h_acc -= (int)(hs << div);
-    }
-    if (vs) {
-        if (vs > TB_XY_MAX) vs = TB_XY_MAX; else if (vs < -TB_XY_MAX) vs = -TB_XY_MAX;
-#ifdef WHEEL_EXTENDED_REPORT
-        r->v += (int16_t)vs;
-#else
-        r->v += (int8_t)vs;
-#endif
-        *v_acc -= (int)(vs << div);
-    }
+    if (hs) { r->h += hs; *h_acc -= (hs << div); }
+    if (vs) { r->v += vs; *v_acc -= (vs << div); }
 
     // スクロール時はXYを出さない
     r->x = 0;
@@ -299,27 +276,12 @@ static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_le
     ay += (ay >= 0 ? den / 2 : -den / 2);
     int32_t ox_q = (int32_t)(ax / den);
     int32_t oy_q = (int32_t)(ay / den);
+    if (ox_q > 127) ox_q = 127; else if (ox_q < -127) ox_q = -127;
+    if (oy_q > 127) oy_q = 127; else if (oy_q < -127) oy_q = -127;
 
-    // 安全対策: 高速入力にも関わらず量子化後に 0 になってしまう場合、
-    // 優勢軸に最小1stepを与えて“止まらない”ようにする
-    int16_t raw_speed = (int16_t)abs((int)ox) + (int16_t)abs((int)oy);
-    if ((ox_q == 0 && oy_q == 0) && (raw_speed > kAccelThreshold)) {
-        if (llabs(rx_q10) >= llabs(ry_q10)) {
-            ox_q = (rx_q10 >= 0) ? 1 : -1;
-        } else {
-            oy_q = (ry_q10 >= 0) ? 1 : -1;
-        }
-    }
-    if (ox_q > TB_XY_MAX) ox_q = TB_XY_MAX; else if (ox_q < -TB_XY_MAX) ox_q = -TB_XY_MAX;
-    if (oy_q > TB_XY_MAX) oy_q = TB_XY_MAX; else if (oy_q < -TB_XY_MAX) oy_q = -TB_XY_MAX;
-
-#ifdef MOUSE_EXTENDED_REPORT
-    r->x = (int16_t)ox_q; r->y = (int16_t)oy_q;
-#else
-    r->x = (int8_t)ox_q;  r->y = (int8_t)oy_q;
-#endif
-    *xa -= (int64_t)(int32_t)ox_q * den;
-    *ya -= (int64_t)(int32_t)oy_q * den;
+    r->x = (int8_t)ox_q; r->y = (int8_t)oy_q;
+    *xa -= (int64_t)ox_q * den;
+    *ya -= (int64_t)oy_q * den;
 
     // 残差クリップ（暴走保険）: 実運用で到達しない十分大きな範囲に拡大
     // 小さすぎると長時間の連続移動や大きな円運動でクリップが発生し、
