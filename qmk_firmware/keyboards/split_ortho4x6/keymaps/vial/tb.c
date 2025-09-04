@@ -42,7 +42,7 @@ typedef struct {
 static side_cfg_t gL, gR;
 
 // 共有（左右で共通）設定：カーソル加速度
-static bool    gAccelEnable = true;
+static bool    gAccelEnable = false; // Keyball風: 既定はオフ（素直なリニア挙動）
 static uint8_t gAccelGainIdx = 0; // 0..kAccelGainMaxIdx
 
 static inline uint32_t pack_cfg(void) {
@@ -98,8 +98,8 @@ static void tb_eeprom_defaults(void) {
     gR.scroll_mode = false;
 
     // 共有
-    gAccelEnable   = true;  // 既定はON
-    gAccelGainIdx  = 3;     // ほどほど（32）
+    gAccelEnable   = false; // Keyball風: デフォルトは加速オフ
+    gAccelGainIdx  = 0;     // 無効時のダミー
 }
 
 static void tb_load_eeprom(void) {
@@ -150,8 +150,8 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 
     if (invert) { x = -x; y = -y; }
 
-    // 加速度倍率（Q8）
-    uint16_t mul_q8 = calc_accel_mul_q8(ox, oy);
+    // Keyball風: 加速度なし（リニア）。
+    uint16_t mul_q8 = ACCEL_MUL_BASE_Q8;
     // 近似的な四捨五入付きスケーリング
     int32_t sx = (int32_t)x * (int32_t)mul_q8;
     int32_t sy = (int32_t)y * (int32_t)mul_q8;
@@ -226,8 +226,8 @@ static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_le
     int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
     int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
 
-    // 加速度倍率（Q8）を計算：回転後のQ10で評価し、左右別ローパスで段差を低減
-    uint16_t mul_q8 = calc_accel_mul_q8_q10(rx_q10, ry_q10, is_left);
+    // Keyball風: 加速度なし（リニア）。CPIのソフト倍率のみ適用
+    uint16_t mul_q8 = ACCEL_MUL_BASE_Q8;
 
     // 64bit蓄積（Q10精度を保ったまま）
     *xa += (int64_t)rx_q10 * (int64_t)cpi * (int64_t)mul_q8;
