@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h> // abs
+#include "timer.h"
 
 // ==== 可変パラメータ（必要に応じて調整） =========================
 static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
@@ -12,6 +13,9 @@ static const uint16_t kCpiList[]   = { 200, 400, 800, 1600, 3200 };
 static const int16_t COS_Q10[] = {    0,  512,  724,  887,  990, 1024,  990,  887,  724,  512,    0};
 static const int16_t SIN_Q10[] = {-1024, -887, -724, -512, -259,    0,  259,  512,  724,  887, 1024};
 static const uint8_t kScrDivList[] = { 3, 4, 5, 6, 7, 8 }; // 2^div のシフト量（全体弱め）
+
+// Keyball風レポート間隔（ms）: 8ms=125Hz。0で無効（毎スキャン出力）
+static const uint16_t kReportIntervalMs = 8;
 
 // 加速度（カーソル加速）関連：Q8 係数（256 = 1.0）
 // gain は『(speed - thr) * gain / 256』を加算する傾き。大きいほど強い。
@@ -138,38 +142,32 @@ static inline void rotate_xy_idx(int8_t* x, int8_t* y, uint8_t idx) {
 // ==== スクロール変換（左右別の蓄積） ==============================
 static int v_acc_l = 0, h_acc_l = 0;
 static int v_acc_r = 0, h_acc_r = 0;
-
-static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bool is_left) {
+// スクロールの蓄積のみ行う（出力は emit 側）
+static void scroll_accumulate(report_mouse_t in, bool invert, uint8_t scr_div_idx, bool is_left, uint8_t rot_idx) {
+    (void)scr_div_idx; // 蓄積段階では未使用
     int *v_acc = is_left ? &v_acc_l : &v_acc_r;
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
-    int8_t x = r->x, y = r->y;
-    // どちらかを0にして1D寄せ
+    int8_t x = in.x, y = in.y;
+    // 回転後に1D寄せ
+    rotate_xy_idx(&x, &y, rot_idx);
     if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
-
     if (invert) { x = -x; y = -y; }
 
-    // Keyball風: 加速度なし（リニア）。
-    uint16_t mul_q8 = ACCEL_MUL_BASE_Q8;
-    // 近似的な四捨五入付きスケーリング
-    int32_t sx = (int32_t)x * (int32_t)mul_q8;
-    int32_t sy = (int32_t)y * (int32_t)mul_q8;
-    if (sx >= 0) sx += ACCEL_MUL_BASE_Q8 / 2; else sx -= ACCEL_MUL_BASE_Q8 / 2;
-    if (sy >= 0) sy += ACCEL_MUL_BASE_Q8 / 2; else sy -= ACCEL_MUL_BASE_Q8 / 2;
-    sx /= ACCEL_MUL_BASE_Q8; sy /= ACCEL_MUL_BASE_Q8;
+    // Keyball風: 加速度なし（リニア）
+    *h_acc += (int)x;
+    *v_acc += (int)y;
+}
 
+// スクロールの量子化と出力値取得（量子化した分だけ蓄積から減算）
+static void scroll_emit(report_mouse_t* out, uint8_t scr_div_idx, bool is_left) {
+    int *v_acc = is_left ? &v_acc_l : &v_acc_r;
+    int *h_acc = is_left ? &h_acc_l : &h_acc_r;
     uint8_t div = kScrDivList[scr_div_idx];
-    *h_acc += (int)sx; *v_acc += (int)sy;
-
     int8_t hs = (int8_t)(*h_acc >> div);
     int8_t vs = (int8_t)(*v_acc >> div);
-
-    if (hs) { r->h += hs; *h_acc -= (hs << div); }
-    if (vs) { r->v += vs; *v_acc -= (vs << div); }
-
-    // スクロール時はXYを出さない
-    r->x = 0;
-    r->y = 0;
+    if (hs) { out->h += hs; *h_acc -= (hs << div); }
+    if (vs) { out->v += vs; *v_acc -= (vs << div); }
 }
 
 // ==== 移動量のソフト倍率（左右別。64bit蓄積） ====================
@@ -213,26 +211,22 @@ static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool 
     return (uint16_t)(ACCEL_MUL_BASE_Q8 + add_q8);
 }
 
-// 角度回転をQ10精度のまま保持してからスケーリング・量子化する版
-static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_left, uint8_t rot_idx) {
+// 角度回転をQ10精度のまま保持して蓄積（出力は emit 側）
+static void move_accumulate(report_mouse_t in, uint16_t cpi, bool is_left, uint8_t rot_idx) {
     int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
     int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
-
-    // 元のセンサ値（int8）
-    int8_t ox = r->x, oy = r->y;
-
-    // Q10で回転（ここでは四捨五入せず精度維持）
+    int8_t ox = in.x, oy = in.y;
     int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
     int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
-
-    // Keyball風: 加速度なし（リニア）。CPIのソフト倍率のみ適用
-    uint16_t mul_q8 = ACCEL_MUL_BASE_Q8;
-
-    // 64bit蓄積（Q10精度を保ったまま）
+    uint16_t mul_q8 = ACCEL_MUL_BASE_Q8; // リニア
     *xa += (int64_t)rx_q10 * (int64_t)cpi * (int64_t)mul_q8;
     *ya += (int64_t)ry_q10 * (int64_t)cpi * (int64_t)mul_q8;
+}
 
-    // 出力への変換：分母に Q10 を含めて符号付き四捨五入
+// 蓄積から量子化して出力（量子化した分だけ蓄積から減算）
+static void move_emit(report_mouse_t* out, bool is_left) {
+    int64_t *xa = is_left ? &x_acc_l : &x_acc_r;
+    int64_t *ya = is_left ? &y_acc_l : &y_acc_r;
     int64_t den = (int64_t)CPI_BASE * (int64_t)ACCEL_MUL_BASE_Q8 * (int64_t)1024; // = 800 * 256 * 1024
     int64_t ax = *xa;
     int64_t ay = *ya;
@@ -242,15 +236,11 @@ static void apply_move_scale_precise(report_mouse_t* r, uint16_t cpi, bool is_le
     int32_t oy_q = (int32_t)(ay / den);
     if (ox_q > 127) ox_q = 127; else if (ox_q < -127) ox_q = -127;
     if (oy_q > 127) oy_q = 127; else if (oy_q < -127) oy_q = -127;
-
-    r->x = (int8_t)ox_q; r->y = (int8_t)oy_q;
+    out->x += (int8_t)ox_q; out->y += (int8_t)oy_q;
     *xa -= (int64_t)ox_q * den;
     *ya -= (int64_t)oy_q * den;
-
-    // 残差クリップ（暴走保険）: 実運用で到達しない十分大きな範囲に拡大
-    // 小さすぎると長時間の連続移動や大きな円運動でクリップが発生し、
-    // 系統的なズレやカクつきの原因になるため、ここでは事実上無制限に近い値を採用
-    const int64_t bound = (int64_t)1 << 60; // ≒1.15e18
+    // 暴走保険
+    const int64_t bound = (int64_t)1 << 60;
     if (*xa >  bound) { *xa =  bound; }
     if (*xa < -bound) { *xa = -bound; }
     if (*ya >  bound) { *ya =  bound; }
@@ -344,31 +334,44 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
     return true;
 }
 
-report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
-    // 左
-    {
-        if (gL.scroll_mode) {
-            // スクロール時のみ従来どおり回転->1D化
-            int8_t x = left.x, y = left.y;
-            rotate_xy_idx(&x, &y, gL.rot_idx);
-            left.x = x; left.y = y;
-            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
-        } else {
-            // カーソル移動は高精度回転経路で処理
-            apply_move_scale_precise(&left, kCpiList[gL.cpi_idx], true, gL.rot_idx);
-        }
+report_mouse_t tb_task_combined(report_mouse_t left_in, report_mouse_t right_in) {
+    // まず蓄積のみ行う（出力は後段のスロットリング判定で）
+    if (gL.scroll_mode) {
+        scroll_accumulate(left_in, gL.scr_invert, gL.scr_div_idx, true, gL.rot_idx);
+    } else {
+        move_accumulate(left_in, kCpiList[gL.cpi_idx], true, gL.rot_idx);
+    }
+    if (gR.scroll_mode) {
+        scroll_accumulate(right_in, gR.scr_invert, gR.scr_div_idx, false, gR.rot_idx);
+    } else {
+        move_accumulate(right_in, kCpiList[gR.cpi_idx], false, gR.rot_idx);
     }
 
-    // 右
-    {
-        if (gR.scroll_mode) {
-            int8_t x = right.x, y = right.y;
-            rotate_xy_idx(&x, &y, gR.rot_idx);
-            right.x = x; right.y = y;
-            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
-        } else {
-            apply_move_scale_precise(&right, kCpiList[gR.cpi_idx], false, gR.rot_idx);
+    // スロットリング：一定間隔でまとめて量子化・出力
+    static uint32_t last_ms = 0;
+    uint32_t now = timer_read32();
+    if (kReportIntervalMs > 0) {
+        if (TIMER_DIFF_32(now, last_ms) < kReportIntervalMs) {
+            // 出力しないフレーム
+            report_mouse_t zero = {0};
+            return pointing_device_combine_reports(zero, zero);
         }
+        last_ms = now;
+    }
+
+    report_mouse_t left = {0};
+    report_mouse_t right = {0};
+    if (gL.scroll_mode) {
+        scroll_emit(&left, gL.scr_div_idx, true);
+        left.x = 0; left.y = 0; // スクロール時はXY無効
+    } else {
+        move_emit(&left, true);
+    }
+    if (gR.scroll_mode) {
+        scroll_emit(&right, gR.scr_div_idx, false);
+        right.x = 0; right.y = 0;
+    } else {
+        move_emit(&right, false);
     }
 
     return pointing_device_combine_reports(left, right);
