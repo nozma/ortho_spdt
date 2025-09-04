@@ -14,12 +14,15 @@ static const int16_t SIN_Q10[] = {-1024, -887, -724, -512, -259,    0,  259,  51
 static const uint8_t kScrDivList[] = { 3, 4, 5, 6, 7, 8 }; // 2^div のシフト量（全体弱め）
 
 // 加速度（カーソル加速）関連：Q8 係数（256 = 1.0）
-// gain は『(speed - thr) * gain / 256』を加算する傾き。大きいほど強い。
+// gain は強さ（最大加速に対する比率）として扱う。Keyball の“滑らかな増加”の感触を意識し、
+// 速度に対して滑らかな S カーブ（smoothstep）で加速度を決める。
 static const uint16_t kAccelGainQ8[] = { 0, 16, 24, 32, 40, 48, 64, 80 };
 static const uint8_t  kAccelGainMaxIdx = (ARRAY_SIZE(kAccelGainQ8) - 1);
-static const uint8_t  kAccelThreshold = 4;       // この合計移動（|dx|+|dy|）を超えると加速
+static const uint8_t  kAccelThreshold = 4;       // この合計移動（|dx|+|dy|）を超えると加速開始（デッドゾーン）
 static const uint16_t ACCEL_MUL_BASE_Q8 = 256;   // 1.0x
 static const uint16_t ACCEL_MUL_MAX_Q8  = 1024;  // 4.0x 上限
+// 加速が最大に達する“速さ”。しきい値からこの値までを S カーブで補間する。
+static const uint8_t  kAccelFullSpeed = 24;      // ≈ 24count で最大加速（要調整）
 
 // 前方宣言（apply_scroll から使用）
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y);
@@ -139,7 +142,7 @@ static inline void rotate_xy_idx(int8_t* x, int8_t* y, uint8_t idx) {
 static int v_acc_l = 0, h_acc_l = 0;
 static int v_acc_r = 0, h_acc_r = 0;
 
-static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bool is_left) {
+static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bool is_left, uint8_t rot_idx) {
     int *v_acc = is_left ? &v_acc_l : &v_acc_r;
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
@@ -150,8 +153,10 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
 
     if (invert) { x = -x; y = -y; }
 
-    // 加速度倍率（Q8）
-    uint16_t mul_q8 = calc_accel_mul_q8(ox, oy);
+    // 加速度倍率（Q8）：回転後Q10で評価し、左右別ローパスで段差を低減
+    int32_t rx_q10 = (int32_t)ox * COS_Q10[rot_idx] - (int32_t)oy * SIN_Q10[rot_idx];
+    int32_t ry_q10 = (int32_t)ox * SIN_Q10[rot_idx] + (int32_t)oy * COS_Q10[rot_idx];
+    uint16_t mul_q8 = calc_accel_mul_q8_q10(rx_q10, ry_q10, is_left);
     // 近似的な四捨五入付きスケーリング
     int32_t sx = (int32_t)x * (int32_t)mul_q8;
     int32_t sy = (int32_t)y * (int32_t)mul_q8;
@@ -181,15 +186,32 @@ static int32_t speed_q10_lp_r = 0;
 
 static inline uint16_t calc_accel_mul_q8(int8_t x, int8_t y) {
     if (!gAccelEnable) return ACCEL_MUL_BASE_Q8;
-    uint16_t mul = ACCEL_MUL_BASE_Q8;
+    // 従来の単純線形はピーキーになりやすいため、ここでも S カーブで補間
     uint16_t speed = (uint16_t)abs((int)x) + (uint16_t)abs((int)y);
-    if (speed > kAccelThreshold) {
-        uint16_t over = speed - kAccelThreshold;
-        uint32_t add  = (uint32_t)over * (uint32_t)kAccelGainQ8[gAccelGainIdx];
-        mul += (uint16_t)MIN(add, (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8));
-        if (mul > ACCEL_MUL_MAX_Q8) mul = ACCEL_MUL_MAX_Q8;
-    }
-    return mul;
+    if (speed <= kAccelThreshold) return ACCEL_MUL_BASE_Q8;
+
+    uint16_t span = (kAccelFullSpeed > kAccelThreshold) ? (uint16_t)(kAccelFullSpeed - kAccelThreshold) : 1;
+    uint16_t over = (speed - kAccelThreshold);
+    if (over > span) over = span;
+
+    // t in Q15 (0..1)
+    uint32_t t_q15 = ((uint32_t)over << 15) / (uint32_t)span;
+    // smoothstep: 3t^2 - 2t^3 (Q15)
+    uint32_t t2_q15 = (t_q15 * t_q15 + (1 << 14)) >> 15;
+    uint32_t t3_q15 = (t2_q15 * t_q15 + (1 << 14)) >> 15;
+    int32_t  s_q15  = (int32_t)(3 * t2_q15 - 2 * t3_q15);
+    if (s_q15 < 0) s_q15 = 0; else if (s_q15 > 32767) s_q15 = 32767;
+
+    // gain スケール（Q15）: 0..1 に正規化
+    uint32_t gain_max = (uint32_t)kAccelGainQ8[kAccelGainMaxIdx];
+    uint32_t gain_q15 = (gain_max ? ((uint32_t)kAccelGainQ8[gAccelGainIdx] << 15) / gain_max : 0);
+
+    uint32_t max_add = (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8);
+    uint32_t max_add_scaled_q15 = (max_add * gain_q15 + (1 << 14)) >> 15;
+    uint32_t add_q8 = (s_q15 * max_add_scaled_q15 + (1 << 14)) >> 15;
+    uint32_t mul = (uint32_t)ACCEL_MUL_BASE_Q8 + add_q8;
+    if (mul > ACCEL_MUL_MAX_Q8) mul = ACCEL_MUL_MAX_Q8;
+    return (uint16_t)mul;
 }
 
 // 回転後Q10の速度から、連続しきい値＋ローパスで滑らかに加速係数を算出
@@ -202,15 +224,28 @@ static inline uint16_t calc_accel_mul_q8_q10(int32_t x_q10, int32_t y_q10, bool 
     int32_t lp = *plp + ((s_q10 - *plp) >> 3);
     *plp = lp;
 
-    // 連続しきい値: over_q10 = max(0, lp - thr<<10)
+    // 連続しきい値＋Sカーブで滑らかに（Keyball風の“滑り出しなめらか”）
     int32_t thr_q10 = ((int32_t)kAccelThreshold) << 10;
-    int32_t over_q10 = lp - thr_q10;
-    if (over_q10 <= 0) return ACCEL_MUL_BASE_Q8;
+    if (lp <= thr_q10) return ACCEL_MUL_BASE_Q8;
 
-    // add_q8 = (over_q10 * gain_q8) >> 10 （Q10→整数カウントへ変換しつつ連続化）
-    uint32_t add_q8 = ((uint64_t)(uint32_t)over_q10 * (uint32_t)kAccelGainQ8[gAccelGainIdx] + 512) >> 10;
+    int32_t full_q10 = ((int32_t)kAccelFullSpeed) << 10;
+    int32_t span_q10 = full_q10 - thr_q10; if (span_q10 <= 0) span_q10 = 1;
+    int32_t over_q10 = lp - thr_q10; if (over_q10 > span_q10) over_q10 = span_q10;
+
+    // t in Q15
+    uint32_t t_q15 = ((uint64_t)(uint32_t)over_q10 << 15) / (uint32_t)span_q10;
+    uint32_t t2_q15 = (t_q15 * t_q15 + (1 << 14)) >> 15;
+    uint32_t t3_q15 = (t2_q15 * t_q15 + (1 << 14)) >> 15;
+    int32_t  s_q15  = (int32_t)(3 * t2_q15 - 2 * t3_q15);
+    if (s_q15 < 0) s_q15 = 0; else if (s_q15 > 32767) s_q15 = 32767;
+
+    // gain スケール（Q15）
+    uint32_t gain_max = (uint32_t)kAccelGainQ8[kAccelGainMaxIdx];
+    uint32_t gain_q15 = (gain_max ? ((uint32_t)kAccelGainQ8[gAccelGainIdx] << 15) / gain_max : 0);
+
     uint32_t max_add = (uint32_t)(ACCEL_MUL_MAX_Q8 - ACCEL_MUL_BASE_Q8);
-    if (add_q8 > max_add) add_q8 = max_add;
+    uint32_t max_add_scaled_q15 = (max_add * gain_q15 + (1 << 14)) >> 15;
+    uint32_t add_q8 = (s_q15 * max_add_scaled_q15 + (1 << 14)) >> 15;
     return (uint16_t)(ACCEL_MUL_BASE_Q8 + add_q8);
 }
 
@@ -353,7 +388,7 @@ report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
             int8_t x = left.x, y = left.y;
             rotate_xy_idx(&x, &y, gL.rot_idx);
             left.x = x; left.y = y;
-            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true);
+            apply_scroll(&left, gL.scr_invert, gL.scr_div_idx, true, gL.rot_idx);
         } else {
             // カーソル移動は高精度回転経路で処理
             apply_move_scale_precise(&left, kCpiList[gL.cpi_idx], true, gL.rot_idx);
@@ -366,7 +401,7 @@ report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right) {
             int8_t x = right.x, y = right.y;
             rotate_xy_idx(&x, &y, gR.rot_idx);
             right.x = x; right.y = y;
-            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false);
+            apply_scroll(&right, gR.scr_invert, gR.scr_div_idx, false, gR.rot_idx);
         } else {
             apply_move_scale_precise(&right, kCpiList[gR.cpi_idx], false, gR.rot_idx);
         }
