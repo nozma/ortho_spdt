@@ -144,7 +144,6 @@ static void apply_scroll(report_mouse_t* r, bool invert, uint8_t scr_div_idx, bo
     int *h_acc = is_left ? &h_acc_l : &h_acc_r;
 
     int8_t x = r->x, y = r->y;
-    int8_t ox = x, oy = y; // 速度評価用に原値を保持
     // どちらかを0にして1D寄せ
     if (abs((int)x) > abs((int)y)) y = 0; else x = 0;
 
