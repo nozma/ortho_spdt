@@ -131,100 +131,15 @@
         ]
     },
     "customKeycodes": [
-        {
-            "name": "Trackball Left",
-            "title": "左: CPIを次へ",
-            "shortName": "L CPI+"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: CPIを前へ",
-            "shortName": "L CPI-"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: 回転+1段階",
-            "shortName": "L ROT+"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: 回転-1段階",
-            "shortName": "L ROT-"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: スクロール切替",
-            "shortName": "L SCR"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: スクロール分割",
-            "shortName": "L SDIV"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: スクロール反転",
-            "shortName": "L SINV"
-        },
-        {
-            "name": "Trackball Left",
-            "title": "左: 水平スクロール反転",
-            "shortName": "L SHINV"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: CPIを次へ",
-            "shortName": "R CPI+"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: CPIを前へ",
-            "shortName": "R CPI-"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: 回転+1段階",
-            "shortName": "R ROT+"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: 回転-1段階",
-            "shortName": "R ROT-"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: スクロール切替",
-            "shortName": "R SCR"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: スクロール分割",
-            "shortName": "R SDIV"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: スクロール反転",
-            "shortName": "R SINV"
-        },
-        {
-            "name": "Trackball Right",
-            "title": "右: 水平スクロール反転",
-            "shortName": "R SHINV"
-        },
-        {
-            "name": "Trackball Accel",
-            "title": "加速度: トグル",
-            "shortName": "ACC TOG"
-        },
-        {
-            "name": "Trackball Accel",
-            "title": "加速度: 強く",
-            "shortName": "ACC +"
-        },
-        {
-            "name": "Trackball Accel",
-            "title": "加速度: 弱く",
-            "shortName": "ACC -"
-        }
+        {"name": "Trackball Left",  "title": "左: CPIを次へ",           "shortName": "L CPI+"},
+        {"name": "Trackball Left",  "title": "左: CPIを前へ",           "shortName": "L CPI-"},
+        {"name": "Trackball Left",  "title": "左: 回転+15°",            "shortName": "L ROT+"},
+        {"name": "Trackball Left",  "title": "左: 回転-15°",            "shortName": "L ROT-"},
+        {"name": "Trackball Right", "title": "右: CPIを次へ",           "shortName": "R CPI+"},
+        {"name": "Trackball Right", "title": "右: CPIを前へ",           "shortName": "R CPI-"},
+        {"name": "Trackball Right", "title": "右: 回転+15°",            "shortName": "R ROT+"},
+        {"name": "Trackball Right", "title": "右: 回転-15°",            "shortName": "R ROT-"},
+        {"name": "Trackball Mode",  "title": "スクロール/カーソル切替", "shortName": "SCR TOG"},
+        {"name": "Trackball Mode",  "title": "スクロール速度",          "shortName": "SCR DIV"}
     ]
 }
