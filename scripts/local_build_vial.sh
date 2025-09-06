@@ -9,7 +9,10 @@ set -euo pipefail
 REPO_ROOT=$(cd "$(dirname "$0")/.." && pwd)
 TARGET_JSON="$REPO_ROOT/target.json"
 VIAL_QMK_REF="0f70080d790c0c802729e2c9fbbe67596ba37aac"
-VIAL_QMK_DIR="${VIAL_QMK_DIR:-$REPO_ROOT/.vial-qmk}"
+# By default, place vial-qmk outside the workspace to avoid nested Git repos being picked up by VS Code.
+# Override with VIAL_QMK_DIR to keep it elsewhere (e.g., "$REPO_ROOT/.vial-qmk").
+DEFAULT_CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}/ortho_spdt64"
+VIAL_QMK_DIR="${VIAL_QMK_DIR:-$DEFAULT_CACHE_BASE/vial-qmk}"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "[!] git が見つかりません。" >&2
@@ -32,6 +35,8 @@ if [[ ! -f "$TARGET_JSON" ]]; then
 fi
 
 echo "[i] vial-qmk を取得/更新します -> $VIAL_QMK_DIR (@$VIAL_QMK_REF)"
+# Ensure parent directory exists when using a cache location
+mkdir -p "$(dirname "$VIAL_QMK_DIR")"
 if [[ -d "$VIAL_QMK_DIR/.git" ]]; then
   git -C "$VIAL_QMK_DIR" fetch --tags --prune --depth 1 origin
   git -C "$VIAL_QMK_DIR" fetch origin "$VIAL_QMK_REF" || true
@@ -73,12 +78,14 @@ for ent in data.get('include',[]):
 PY
 )
 
-echo "[i] ビルドを開始します"
+ARTIFACT_DIR="${ARTIFACT_DIR:-$REPO_ROOT/.vial-qmk/.build}"
+mkdir -p "$ARTIFACT_DIR"
+echo "[i] ビルドを開始します (出力先: $ARTIFACT_DIR)"
 while IFS=$'\t' read -r keyboard keymap target name flags; do
-  echo "[i] make $keyboard:$keymap:$target $flags"
-  make $keyboard:$keymap:$target $flags
-  src=".build/${keyboard}_${keymap}.${target}"
-  dst=".build/${name}.${target}"
+  echo "[i] make $keyboard:$keymap:$target BUILD_DIR=$ARTIFACT_DIR $flags"
+  make BUILD_DIR="$ARTIFACT_DIR" $keyboard:$keymap:$target $flags
+  src="$ARTIFACT_DIR/${keyboard}_${keymap}.${target}"
+  dst="$ARTIFACT_DIR/${name}.${target}"
   if [[ -f "$src" ]]; then
     mv "$src" "$dst"
     echo "[i] -> $dst"
@@ -87,6 +94,5 @@ while IFS=$'\t' read -r keyboard keymap target name flags; do
   fi
 done <<< "$matrix"
 
-echo "[i] 完了。生成物は $VIAL_QMK_DIR/.build にあります。"
+echo "[i] 完了。生成物は $ARTIFACT_DIR にあります。"
 deactivate || true
-
