@@ -164,8 +164,8 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
     static float prev_x_r = 0.0f, prev_y_r = 0.0f;
     static float x_acc_l = 0.0f, y_acc_l = 0.0f;
     static float x_acc_r = 0.0f, y_acc_r = 0.0f;
-    static int   h_acm_l = 0,    v_acm_l = 0;
-    static int   h_acm_r = 0,    v_acm_r = 0;
+    static float h_acm_l = 0.0f, v_acm_l = 0.0f;
+    static float h_acm_r = 0.0f, v_acm_r = 0.0f;
 
     const float sensitivity = 0.5f;            // base cursor sensitivity
     const float smoothing_factor = 0.7f;       // IIR smoothing
@@ -183,6 +183,9 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
     float sy = prev_y * smoothing_factor + ry * (1.0f - smoothing_factor);
     if (is_left) { prev_x_l = sx; prev_y_l = sy; } else { prev_x_r = sx; prev_y_r = sy; }
 
+    // 平滑後の値を保存（スクロール専用のカーブに使用）
+    float smx = sx, smy = sy;
+
     float mag = sqrtf(sx * sx + sy * sy);
     float dyn = 1.0f + mag / 10.0f;
     if (dyn < 0.5f) dyn = 0.5f; else if (dyn > 3.0f) dyn = 3.0f;
@@ -194,17 +197,31 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
 
     bool scroll = is_left ? s->scroll_mode : false;
     if (scroll) {
-        // 1D scroll selection per side
-        if (abs((int)sx) > abs((int)sy)) sy = 0; else sx = 0;
-        int* ph = is_left ? &h_acm_l : &h_acm_r;
-        int* pv = is_left ? &v_acm_l : &v_acm_r;
-        if (g_scrl_inv) { *ph += (int)sx; *pv -= (int)sy; }
-        else            { *ph -= (int)sx; *pv += (int)sy; }
+        // スクロール専用の非線形カーブ（低速域を持ち上げ、高速域を圧縮）
+        // y = gain * sign(x) * |x|^gamma, 0<gamma<1
+        const float sc_gain  = 1.25f;  // 低速域の持ち上げ量
+        const float sc_gamma = 0.8f;   // 圧縮の強さ（小さいほど強く圧縮）
 
-        int8_t h = (int8_t)(*ph >> k_scr_divs[g_scrl_div]);
-        int8_t v = (int8_t)(*pv >> k_scr_divs[g_scrl_div]);
-        if (h) { mr->h += h; *ph -= (h << k_scr_divs[g_scrl_div]); }
-        if (v) { mr->v += v; *pv -= (v << k_scr_divs[g_scrl_div]); }
+        // 1D scroll selection per side（平滑後の生値ベース）
+        float sx_s = smx, sy_s = smy;
+        if (fabsf(sx_s) > fabsf(sy_s)) sy_s = 0.0f; else sx_s = 0.0f;
+
+        // 非線形変換を適用
+        float sx_nl = (sx_s == 0.0f) ? 0.0f : copysignf(sc_gain * powf(fabsf(sx_s), sc_gamma), sx_s);
+        float sy_nl = (sy_s == 0.0f) ? 0.0f : copysignf(sc_gain * powf(fabsf(sy_s), sc_gamma), sy_s);
+
+        float* ph = is_left ? &h_acm_l : &h_acm_r;
+        float* pv = is_left ? &v_acm_l : &v_acm_r;
+        if (g_scrl_inv) { *ph += sx_nl; *pv -= sy_nl; }
+        else            { *ph -= sx_nl; *pv += sy_nl; }
+
+        // シフト量を実数除算で再現（累積は float で保持）
+        const int   sh  = k_scr_divs[g_scrl_div];
+        const float scl = (float)(1 << sh);
+        int8_t h = (int8_t)(*ph / scl);
+        int8_t v = (int8_t)(*pv / scl);
+        if (h) { mr->h += h; *ph -= (float)h * scl; }
+        if (v) { mr->v += v; *pv -= (float)v * scl; }
         mr->x = 0; mr->y = 0;
     } else {
         float* pax = is_left ? &x_acc_l : &x_acc_r;
