@@ -35,6 +35,22 @@ static tb_side_t gL, gR;
 static bool      g_scrl_inv = COCOT_SCROLL_INV_DEFAULT;
 static uint8_t   g_scrl_div = 4; // default divider index
 
+// ====== Scroll curve parameters (global) =========================
+// sc_gain 調整用の候補値（7段階、0.5..2.0）
+static const float k_sc_gain_table[] = {
+    0.50f, 0.75f, 1.00f, 1.25f, 1.50f, 1.75f, 2.00f
+};
+#define SC_GAIN_SIZE (sizeof(k_sc_gain_table)/sizeof(k_sc_gain_table[0]))
+
+// sc_gamma 調整用の候補値（5段階、0.50..1.50、0.25刻み）
+static const float k_sc_gamma_table[] = {
+    0.50f, 0.75f, 1.00f, 1.25f, 1.50f
+};
+#define SC_GAMMA_SIZE (sizeof(k_sc_gamma_table)/sizeof(k_sc_gamma_table[0]))
+
+static uint8_t g_sc_gain_idx = 7;   // default -> 1.25
+static uint8_t g_sc_gamma_idx = 7;  // default -> 0.80 (現状コード準拠)
+
 // ====== EEPROM pack/unpack =======================================
 static inline uint32_t pack_cfg(void) {
     uint32_t v = 0;
@@ -46,6 +62,8 @@ static inline uint32_t pack_cfg(void) {
     v |= (uint32_t)(gR.scroll_mode ? 1:0)  << 19; // 1 bit
     v |= (uint32_t)(g_scrl_inv ? 1:0)      << 20; // 1 bit
     v |= (uint32_t)(g_scrl_div & 0x7)      << 21; // 3 bits
+    v |= (uint32_t)(g_sc_gamma_idx & 0xF)  << 24; // 4 bits
+    v |= (uint32_t)(g_sc_gain_idx & 0xF)   << 28; // 4 bits
     return v;
 }
 
@@ -58,6 +76,8 @@ static inline void unpack_cfg(uint32_t v) {
     gR.scroll_mode = ((v >> 19) & 1) != 0;
     g_scrl_inv     = ((v >> 20) & 1) != 0;
     g_scrl_div     = (v >> 21) & 0x7;
+    g_sc_gamma_idx = (v >> 24) & 0xF;
+    g_sc_gain_idx  = (v >> 28) & 0xF;
 }
 
 static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
@@ -80,6 +100,8 @@ static void tb_defaults(void) {
 
     g_scrl_inv = COCOT_SCROLL_INV_DEFAULT;
     g_scrl_div = 4; // >> 5
+    g_sc_gain_idx = 3;  // 1.25
+    g_sc_gamma_idx = 1; // 0.75
 }
 
 static void tb_load(void) {
@@ -94,6 +116,8 @@ static void tb_load(void) {
     if (gL.cpi_idx >= CPI_OPTION_SIZE || gR.cpi_idx >= CPI_OPTION_SIZE) bad = true;
     if (gL.rot_idx >= ANGLE_SIZE || gR.rot_idx >= ANGLE_SIZE) bad = true;
     if (g_scrl_div >= SCRL_DIV_SIZE) bad = true;
+    if (g_sc_gain_idx >= SC_GAIN_SIZE) bad = true;
+    if (g_sc_gamma_idx >= SC_GAMMA_SIZE) bad = true;
     if (bad) {
         tb_defaults();
         tb_save();
@@ -151,6 +175,54 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
                 tb_save();
             }
             return false;
+        case TB_SC_GAIN_UP:
+            if (record->event.pressed) {
+                float curr = k_sc_gain_table[g_sc_gain_idx];
+                float tgt  = curr + 0.10f;
+                float maxv = k_sc_gain_table[SC_GAIN_SIZE - 1];
+                if (tgt > maxv) tgt = maxv;
+                // 近傍から最も近いインデックスを探索
+                uint8_t best = g_sc_gain_idx;
+                float   best_err = fabsf(k_sc_gain_table[best] - tgt);
+                for (uint8_t i = 0; i < SC_GAIN_SIZE; ++i) {
+                    float e = fabsf(k_sc_gain_table[i] - tgt);
+                    if (e < best_err) { best = i; best_err = e; }
+                }
+                if (best != g_sc_gain_idx) { g_sc_gain_idx = best; tb_save(); }
+            }
+            return false;
+        case TB_SC_GAIN_DN:
+            if (record->event.pressed) {
+                float curr = k_sc_gain_table[g_sc_gain_idx];
+                float tgt  = curr - 0.10f;
+                float minv = k_sc_gain_table[0];
+                if (tgt < minv) tgt = minv;
+                uint8_t best = g_sc_gain_idx;
+                float   best_err = fabsf(k_sc_gain_table[best] - tgt);
+                for (uint8_t i = 0; i < SC_GAIN_SIZE; ++i) {
+                    float e = fabsf(k_sc_gain_table[i] - tgt);
+                    if (e < best_err) { best = i; best_err = e; }
+                }
+                if (best != g_sc_gain_idx) { g_sc_gain_idx = best; tb_save(); }
+            }
+            return false;
+        case TB_SC_GAMMA_UP:
+            if (record->event.pressed) {
+                if (g_sc_gamma_idx + 1 < SC_GAMMA_SIZE) { g_sc_gamma_idx++; tb_save(); }
+            }
+            return false;
+        case TB_SC_GAMMA_DN:
+            if (record->event.pressed) {
+                if (g_sc_gamma_idx > 0) { g_sc_gamma_idx--; tb_save(); }
+            }
+            return false;
+        case TB_SC_RESET:
+            if (record->event.pressed) {
+                g_sc_gain_idx = 3;   // 1.25
+                g_sc_gamma_idx = 1;  // 0.75
+                tb_save();
+            }
+            return false;
         default:
             break;
     }
@@ -198,9 +270,9 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
     bool scroll = is_left ? s->scroll_mode : false;
     if (scroll) {
         // スクロール専用の非線形カーブ（低速域を持ち上げ、高速域を圧縮）
-        // y = gain * sign(x) * |x|^gamma, 0<gamma<1
-        const float sc_gain  = 1.25f;  // 低速域の持ち上げ量
-        const float sc_gamma = 0.8f;   // 圧縮の強さ（小さいほど強く圧縮）
+        // y = gain * sign(x) * |x|^gamma, 0<gamma
+        const float sc_gain  = k_sc_gain_table[g_sc_gain_idx];
+        const float sc_gamma = k_sc_gamma_table[g_sc_gamma_idx];
 
         // 1D scroll selection per side（平滑後の生値ベース）
         float sx_s = smx, sy_s = smy;
