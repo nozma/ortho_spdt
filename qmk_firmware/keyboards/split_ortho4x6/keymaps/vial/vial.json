@@ -140,6 +140,11 @@
         {"name": "Trackball Right", "title": "右: 回転+15°",            "shortName": "R ROT+"},
         {"name": "Trackball Right", "title": "右: 回転-15°",            "shortName": "R ROT-"},
         {"name": "Trackball Mode",  "title": "スクロール/カーソル切替", "shortName": "SCR TOG"},
-        {"name": "Trackball Mode",  "title": "スクロール速度",          "shortName": "SCR DIV"}
+        {"name": "Trackball Mode",  "title": "スクロール速度",          "shortName": "SCR DIV"},
+        {"name": "Scroll Curve",    "title": "スクロール: sc_gain を増加 (+0.10)",  "shortName": "GAIN+"},
+        {"name": "Scroll Curve",    "title": "スクロール: sc_gain を減少 (-0.10)",  "shortName": "GAIN-"},
+        {"name": "Scroll Curve",    "title": "スクロール: sc_gamma を増加 (+0.05)", "shortName": "GAMMA+"},
+        {"name": "Scroll Curve",    "title": "スクロール: sc_gamma を減少 (-0.05)", "shortName": "GAMMA-"},
+        {"name": "Scroll Curve",    "title": "スクロール: カーブ設定を初期化",      "shortName": "RESET"}
     ]
 }
