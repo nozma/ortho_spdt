@@ -7,6 +7,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <limits.h>
 
 // ====== Config (per-side controls) ===============================
 #ifndef COCOT_SCROLL_INV_DEFAULT
@@ -48,8 +49,9 @@ static const float k_sc_gamma_table[] = {
 };
 #define SC_GAMMA_SIZE (sizeof(k_sc_gamma_table)/sizeof(k_sc_gamma_table[0]))
 
-static uint8_t g_sc_gain_idx = 7;   // default -> 1.25
-static uint8_t g_sc_gamma_idx = 7;  // default -> 0.80 (現状コード準拠)
+// 初期インデックスは有効範囲内に設定（tb_loadで上書きされる前提でも安全側に）
+static uint8_t g_sc_gain_idx = 3;   // 1.25
+static uint8_t g_sc_gamma_idx = 1;  // 0.75
 
 // ====== EEPROM pack/unpack =======================================
 static inline uint32_t pack_cfg(void) {
@@ -290,18 +292,57 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
         // シフト量を実数除算で再現（累積は float で保持）
         const int   sh  = k_scr_divs[g_scrl_div];
         const float scl = (float)(1 << sh);
-        int8_t h = (int8_t)(*ph / scl);
-        int8_t v = (int8_t)(*pv / scl);
-        if (h) { mr->h += h; *ph -= (float)h * scl; }
-        if (v) { mr->v += v; *pv -= (float)v * scl; }
+
+        // 出力の飽和処理（WHEEL_EXTENDED_REPORTに追従）
+        float out_h_f = *ph / scl;
+        float out_v_f = *pv / scl;
+
+        long out_h = (long)truncf(out_h_f);
+        long out_v = (long)truncf(out_v_f);
+
+#ifdef WHEEL_EXTENDED_REPORT
+        if (out_h > INT16_MAX) out_h = INT16_MAX; else if (out_h < INT16_MIN) out_h = INT16_MIN;
+        if (out_v > INT16_MAX) out_v = INT16_MAX; else if (out_v < INT16_MIN) out_v = INT16_MIN;
+#else
+        if (out_h > INT8_MAX) out_h = INT8_MAX; else if (out_h < INT8_MIN) out_h = INT8_MIN;
+        if (out_v > INT8_MAX) out_v = INT8_MAX; else if (out_v < INT8_MIN) out_v = INT8_MIN;
+#endif
+
+        if (out_h) { mr->h += (int)out_h; *ph -= (float)out_h * scl; }
+        if (out_v) { mr->v += (int)out_v; *pv -= (float)out_v * scl; }
         mr->x = 0; mr->y = 0;
     } else {
         float* pax = is_left ? &x_acc_l : &x_acc_r;
         float* pay = is_left ? &y_acc_l : &y_acc_r;
         *pax += sx * sensitivity;
         *pay += sy * sensitivity;
-        if (fabsf(*pax) >= 1.0f) { mr->x = (int8_t)(*pax); *pax -= mr->x; } else { mr->x = 0; }
-        if (fabsf(*pay) >= 1.0f) { mr->y = (int8_t)(*pay); *pay -= mr->y; } else { mr->y = 0; }
+
+        // 出力の飽和処理（MOUSE_EXTENDED_REPORTに追従）
+        if (fabsf(*pax) >= 1.0f) {
+            long out_x = (long)truncf(*pax);
+#ifdef MOUSE_EXTENDED_REPORT
+            if (out_x > INT16_MAX) out_x = INT16_MAX; else if (out_x < INT16_MIN) out_x = INT16_MIN;
+#else
+            if (out_x > INT8_MAX) out_x = INT8_MAX; else if (out_x < INT8_MIN) out_x = INT8_MIN;
+#endif
+            mr->x = (int)out_x;
+            *pax -= (float)out_x;
+        } else {
+            mr->x = 0;
+        }
+
+        if (fabsf(*pay) >= 1.0f) {
+            long out_y = (long)truncf(*pay);
+#ifdef MOUSE_EXTENDED_REPORT
+            if (out_y > INT16_MAX) out_y = INT16_MAX; else if (out_y < INT16_MIN) out_y = INT16_MIN;
+#else
+            if (out_y > INT8_MAX) out_y = INT8_MAX; else if (out_y < INT8_MIN) out_y = INT8_MIN;
+#endif
+            mr->y = (int)out_y;
+            *pay -= (float)out_y;
+        } else {
+            mr->y = 0;
+        }
     }
 }
 
