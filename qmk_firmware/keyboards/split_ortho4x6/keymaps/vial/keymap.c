@@ -77,8 +77,8 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [4] = LAYOUT(
                 /* 左手側 */
                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  TB_SC_RESET,     KC_TRANSPARENT,
-                   KC_LEFT_CTRL,    TB_L_CPI_NEXT,   TB_R_CPI_NEXT,   TB_SC_GAIN_UP,   TB_GAMMA_UP,          KC_TRANSPARENT,
-                   KC_LEFT_SHIFT,   TB_L_CPI_PREV,   TB_R_CPI_PREV,   TB_SC_GAIN_DN,   TB_GAMMA_DN,  
+                   KC_LEFT_CTRL,    TB_L_CPI_NEXT,   TB_R_CPI_NEXT,   TB_SC_GAIN_UP,   TB_SC_GAMMA_UP,  KC_TRANSPARENT,
+                   KC_LEFT_SHIFT,   TB_L_CPI_PREV,   TB_R_CPI_PREV,   TB_SC_GAIN_DN,   TB_SC_GAMMA_DN,  
                    KC_TRANSPARENT,                                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  
                 /* 右手側 */
                 KC_TRANSPARENT, 
