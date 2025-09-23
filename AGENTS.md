@@ -7,9 +7,7 @@
 - ルート JSON: `split-ortho4x6.json`, `target.json`（Auto-KDK 用のソース/ターゲット）。
 
 ## ビルド・テスト・開発コマンド
-- ビルド（QMK CLI）: `cd qmk_firmware && qmk compile -kb split_ortho4x6 -km vial`
-  - RP2040 向け UF2/hex を生成。`qmk flash` で書き込み、またはブートローダに入り UF2 をドラッグ&ドロップ。
-- 代替（Make）: `cd qmk_firmware && make split_ortho4x6:vial`
+- ビルドは `scripts/local_build_vial.sh` を使用すること。ファームウェアの出力先（`.vial-qmk/.build/`）はスクリプトのデフォルト設定から変更しない。
 - 構文/定義チェック: `cd qmk_firmware && qmk lint -kb split_ortho4x6`
 - C フォーマット（任意）: `clang-format -i <files>`（差分は最小に）。
 
@@ -18,6 +16,7 @@
 - インデント: スペース4、タブ不可。行幅目安は約100。
 - ファイル名: C/ヘッダは snake_case（例: `paw3222.c`, `tb.c`）、ディレクトリは小文字。
 - QMK 設定は `rules.mk` / `config.h` / `keyboard.json` に配置。
+- `keymap.c` に定義されているキーマップは変更しない。
 
 ## テスト指針
 - 事前チェック: `qmk lint -kb split_ortho4x6` を PR 前に実行。
@@ -26,8 +25,8 @@
 - 変更可視化: `keymap.c` のレイヤコメントを明確に維持。
 
 ## コミット・プルリク方針
-- コミット: 命令形・範囲を絞った件名。例: `firmware: fix split matrix`, `keymap: add scroll toggle`, `case: update left plate`。
-- PR: 目的/概要、主要差分、ビルド結果の抜粋を記載。`images/` や `case/` 変更時はスクリーンショット/レンダを添付。
+- コミット: 命令形・範囲を絞った件名。メッセージ本文も含め、必ず日本語で記述する。
+- PR: 目的/概要、主要差分、ビルド結果の抜粋を日本語で記載。`images/` や `case/` 変更時はスクリーンショット/レンダを添付。
 - 関連 Issue/議論をリンク。1 PR = 1 論点を原則。
 
 ## セキュリティ・設定の注意
