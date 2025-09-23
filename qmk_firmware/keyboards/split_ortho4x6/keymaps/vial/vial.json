@@ -141,6 +141,7 @@
         {"name": "Trackball Right", "title": "右: 回転-15°",            "shortName": "R ROT-"},
         {"name": "Trackball Mode",  "title": "スクロール/カーソル切替", "shortName": "SCR TOG"},
         {"name": "Trackball Mode",  "title": "スクロール速度",          "shortName": "SCR DIV"},
+        {"name": "Trackball Mode",  "title": "スクロール方向: 縦横限定/斜め許可", "shortName": "SCR AX"},
         {"name": "Scroll Curve",    "title": "スクロール: sc_gain を増加 (+0.10)",  "shortName": "GAIN+"},
         {"name": "Scroll Curve",    "title": "スクロール: sc_gain を減少 (-0.10)",  "shortName": "GAIN-"},
         {"name": "Scroll Curve",    "title": "スクロール: sc_gamma を増加 (+0.05)", "shortName": "GAMMA+"},

@@ -21,6 +21,7 @@ enum tb_keycodes {
     TB_R_ROT_L15,
     TB_SCR_TOG,   // 左のみスクロール/カーソル切替
     TB_SCR_DIV,   // スクロール速度（分割）を変更（グローバル）
+    TB_SCR_AX_TOG,// スクロール方向: 縦横限定/斜め許可
     // スクロールカーブ調整（グローバル）
     TB_SC_GAIN_UP,
     TB_SC_GAIN_DN,
