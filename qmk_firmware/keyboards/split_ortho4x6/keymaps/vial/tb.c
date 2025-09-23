@@ -33,8 +33,9 @@ typedef struct {
 } tb_side_t;
 
 static tb_side_t gL, gR;
-static bool      g_scrl_inv = COCOT_SCROLL_INV_DEFAULT;
-static uint8_t   g_scrl_div = 4; // default divider index
+static bool      g_scrl_inv      = COCOT_SCROLL_INV_DEFAULT;
+static uint8_t   g_scrl_div      = 4; // default divider index
+static bool      g_scrl_diag_any = false;
 
 // ====== Scroll curve parameters (global) =========================
 // sc_gain 調整用の候補値（7段階、0.5..2.0）
@@ -64,8 +65,9 @@ static inline uint32_t pack_cfg(void) {
     v |= (uint32_t)(gR.scroll_mode ? 1:0)  << 19; // 1 bit
     v |= (uint32_t)(g_scrl_inv ? 1:0)      << 20; // 1 bit
     v |= (uint32_t)(g_scrl_div & 0x7)      << 21; // 3 bits
-    v |= (uint32_t)(g_sc_gamma_idx & 0xF)  << 24; // 4 bits
-    v |= (uint32_t)(g_sc_gain_idx & 0xF)   << 28; // 4 bits
+    v |= (uint32_t)(g_sc_gamma_idx & 0x7)  << 24; // 3 bits
+    v |= (uint32_t)(g_scrl_diag_any ? 1:0) << 27; // 1 bit
+    v |= (uint32_t)(g_sc_gain_idx & 0x7)   << 28; // 3 bits
     return v;
 }
 
@@ -78,8 +80,9 @@ static inline void unpack_cfg(uint32_t v) {
     gR.scroll_mode = ((v >> 19) & 1) != 0;
     g_scrl_inv     = ((v >> 20) & 1) != 0;
     g_scrl_div     = (v >> 21) & 0x7;
-    g_sc_gamma_idx = (v >> 24) & 0xF;
-    g_sc_gain_idx  = (v >> 28) & 0xF;
+    g_sc_gamma_idx = (v >> 24) & 0x7;
+    g_scrl_diag_any = ((v >> 27) & 1) != 0;
+    g_sc_gain_idx  = (v >> 28) & 0x7;
 }
 
 static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
@@ -104,6 +107,7 @@ static void tb_defaults(void) {
     g_scrl_div = 4; // >> 5
     g_sc_gain_idx = 3;  // 1.25
     g_sc_gamma_idx = 1; // 0.75
+    g_scrl_diag_any = false;
 }
 
 static void tb_load(void) {
@@ -174,6 +178,12 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
         case TB_SCR_DIV:
             if (record->event.pressed) {
                 g_scrl_div = (g_scrl_div + 1) % SCRL_DIV_SIZE;
+                tb_save();
+            }
+            return false;
+        case TB_SCR_AX_TOG:
+            if (record->event.pressed) {
+                g_scrl_diag_any = !g_scrl_diag_any;
                 tb_save();
             }
             return false;
@@ -278,7 +288,13 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
 
         // 1D scroll selection per side（平滑後の生値ベース）
         float sx_s = smx, sy_s = smy;
-        if (fabsf(sx_s) > fabsf(sy_s)) sy_s = 0.0f; else sx_s = 0.0f;
+        if (!g_scrl_diag_any) {
+            if (fabsf(sx_s) > fabsf(sy_s)) {
+                sy_s = 0.0f;
+            } else {
+                sx_s = 0.0f;
+            }
+        }
 
         // 非線形変換を適用
         float sx_nl = (sx_s == 0.0f) ? 0.0f : copysignf(sc_gain * powf(fabsf(sx_s), sc_gamma), sx_s);
