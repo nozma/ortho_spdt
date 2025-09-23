@@ -76,9 +76,9 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     ),
     [4] = LAYOUT(
                 /* 左手側 */
-                   KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  USER14,          KC_TRANSPARENT,
-                   KC_LEFT_CTRL,    USER00,          USER04,          USER10,          USER12,          KC_TRANSPARENT,
-                   KC_LEFT_SHIFT,   USER01,          USER05,          USER11,          USER13,  
+                   KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  TB_SC_RESET,     KC_TRANSPARENT,
+                   KC_LEFT_CTRL,    TB_L_CPI_NEXT,   TB_R_CPI_NEXT,   TB_SC_GAIN_UP,   TB_GAMMA_UP,          KC_TRANSPARENT,
+                   KC_LEFT_SHIFT,   TB_L_CPI_PREV,   TB_R_CPI_PREV,   TB_SC_GAIN_DN,   TB_GAMMA_DN,  
                    KC_TRANSPARENT,                                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  
                 /* 右手側 */
                 KC_TRANSPARENT, 
@@ -113,7 +113,7 @@ const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
                     KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT, (QK_LSFT|KC_LEFT_BRACKET), KC_LEFT_BRACKET, 
                 KC_TRANSPARENT,
                     KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  (QK_LSFT|KC_QUOTE),  
-                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_JYEN,  
+                    KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_TRANSPARENT,  KC_INT1,  
                     KC_TRANSPARENT,  KC_TRANSPARENT,                                    KC_TRANSPARENT
     ),
     [7] = LAYOUT(
