@@ -28,4 +28,5 @@ enum tb_keycodes {
     TB_SC_GAMMA_UP,
     TB_SC_GAMMA_DN,
     TB_SC_RESET,
+    TB_CUR_ACCEL_TOG,
 };

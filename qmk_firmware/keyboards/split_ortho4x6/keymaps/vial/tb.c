@@ -33,9 +33,10 @@ typedef struct {
 } tb_side_t;
 
 static tb_side_t gL, gR;
-static bool      g_scrl_inv      = COCOT_SCROLL_INV_DEFAULT;
-static uint8_t   g_scrl_div      = 4; // default divider index
-static bool      g_scrl_diag_any = false;
+static bool      g_scrl_inv           = COCOT_SCROLL_INV_DEFAULT;
+static uint8_t   g_scrl_div           = 4; // default divider index
+static bool      g_scrl_diag_any      = false;
+static bool      g_cursor_accel_enabled = true;
 
 // ====== Scroll curve parameters (global) =========================
 // sc_gain 調整用の候補値（7段階、0.5..2.0）
@@ -68,6 +69,9 @@ static inline uint32_t pack_cfg(void) {
     v |= (uint32_t)(g_sc_gamma_idx & 0x7)  << 24; // 3 bits
     v |= (uint32_t)(g_scrl_diag_any ? 1:0) << 27; // 1 bit
     v |= (uint32_t)(g_sc_gain_idx & 0x7)   << 28; // 3 bits
+    if (!g_cursor_accel_enabled) {
+        v |= (uint32_t)1 << 31; // 1 bit: cursor acceleration disabled
+    }
     return v;
 }
 
@@ -83,6 +87,8 @@ static inline void unpack_cfg(uint32_t v) {
     g_sc_gamma_idx = (v >> 24) & 0x7;
     g_scrl_diag_any = ((v >> 27) & 1) != 0;
     g_sc_gain_idx  = (v >> 28) & 0x7;
+    bool cursor_accel_disabled = ((v >> 31) & 1) != 0;
+    g_cursor_accel_enabled = !cursor_accel_disabled;
 }
 
 static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
@@ -108,6 +114,7 @@ static void tb_defaults(void) {
     g_sc_gain_idx = 3;  // 1.25
     g_sc_gamma_idx = 1; // 0.75
     g_scrl_diag_any = false;
+    g_cursor_accel_enabled = true;
 }
 
 static void tb_load(void) {
@@ -235,6 +242,12 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
                 tb_save();
             }
             return false;
+        case TB_CUR_ACCEL_TOG:
+            if (record->event.pressed) {
+                g_cursor_accel_enabled = !g_cursor_accel_enabled;
+                tb_save();
+            }
+            return false;
         default:
             break;
     }
@@ -270,16 +283,22 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
     // 平滑後の値を保存（スクロール専用のカーブに使用）
     float smx = sx, smy = sy;
 
-    float mag = sqrtf(sx * sx + sy * sy);
-    float dyn = 1.0f + mag / 10.0f;
-    if (dyn < 0.5f) dyn = 0.5f; else if (dyn > 3.0f) dyn = 3.0f;
+    bool scroll = is_left ? s->scroll_mode : false;
+
+    float dyn = 1.0f;
+    if (!scroll && g_cursor_accel_enabled) {
+        float mag = sqrtf(sx * sx + sy * sy);
+        float dyn_raw = 1.0f + mag / 10.0f;
+        if (dyn_raw < 0.5f) dyn_raw = 0.5f;
+        else if (dyn_raw > 3.0f) dyn_raw = 3.0f;
+        dyn = dyn_raw;
+    }
 
     // Per-side CPI scaling relative to 800 CPI baseline
     float cpi_scale = (float)k_cpi_opts[s->cpi_idx] / 800.0f;
     sx *= sensitivity_multiplier * dyn * cpi_scale;
     sy *= sensitivity_multiplier * dyn * cpi_scale;
 
-    bool scroll = is_left ? s->scroll_mode : false;
     if (scroll) {
         // スクロール専用の非線形カーブ（低速域を持ち上げ、高速域を圧縮）
         // y = gain * sign(x) * |x|^gamma, 0<gamma
