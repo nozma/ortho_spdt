@@ -146,6 +146,7 @@
         {"name": "Scroll Curve",    "title": "スクロール: sc_gain を減少 (-0.10)",  "shortName": "GAIN-"},
         {"name": "Scroll Curve",    "title": "スクロール: sc_gamma を増加 (+0.05)", "shortName": "GAMMA+"},
         {"name": "Scroll Curve",    "title": "スクロール: sc_gamma を減少 (-0.05)", "shortName": "GAMMA-"},
-        {"name": "Scroll Curve",    "title": "スクロール: カーブ設定を初期化",      "shortName": "RESET"}
+        {"name": "Scroll Curve",    "title": "スクロール: カーブ設定を初期化",      "shortName": "RESET"},
+        {"name": "Cursor",          "title": "カーソル: 加速度の有効/無効切替",     "shortName": "ACCEL"}
     ]
 }
