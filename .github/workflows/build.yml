@@ -4,6 +4,10 @@ on:
   push:
     branches:
       - "**"
+    paths:
+      - "qmk_firmware/**"
+      - "target.json"
+      - ".github/workflows/build.yml"
 
 jobs:
   build:
