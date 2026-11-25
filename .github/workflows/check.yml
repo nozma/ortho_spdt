@@ -57,6 +57,9 @@ jobs:
           python -m venv .vial-qmk/.venv
           .vial-qmk/.venv/bin/python -m pip install -r .vial-qmk/requirements.txt
 
+      - name: Test trackball settings protocol and backup script
+        run: python -m unittest discover -s tests -v
+
       - name: Check definitions and keymaps
         env:
           VIAL_QMK_DIR: ${{ github.workspace }}/.vial-qmk

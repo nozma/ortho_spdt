@@ -1,0 +1,2 @@
+# トラックボール設定のUSB Raw HID通信（GUI不要）
+hidapi==0.15.0
