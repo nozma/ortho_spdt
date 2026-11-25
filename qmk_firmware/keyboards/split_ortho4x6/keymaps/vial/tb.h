@@ -9,6 +9,21 @@ void tb_init(void);
 bool tb_process_record(uint16_t keycode, keyrecord_t* record);
 report_mouse_t tb_task_combined(report_mouse_t left, report_mouse_t right);
 
+// USB Raw HID: docs/trackball_settings.md の32バイトプロトコル。
+#define TB_SETTINGS_COMMAND 0x40
+#define TB_SETTINGS_VERSION 1
+#define TB_SETTINGS_GET 1
+#define TB_SETTINGS_SET 2
+
+enum tb_settings_status {
+    TB_SETTINGS_OK,
+    TB_SETTINGS_BAD_VERSION,
+    TB_SETTINGS_INVALID_CONFIG,
+    TB_SETTINGS_LOCKED,
+    TB_SETTINGS_BAD_OPERATION,
+    TB_SETTINGS_BAD_PACKET,
+};
+
 // カスタムキーコード（Vial の QK_KB_0 連番に整列）
 // 左右独立の制御（CPI/回転）
 enum tb_keycodes {

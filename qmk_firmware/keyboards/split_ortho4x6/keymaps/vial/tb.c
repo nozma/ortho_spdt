@@ -3,6 +3,10 @@
 #include "tb.h"
 #include "quantum.h"
 #include "pointing_device.h"
+#include "split_util.h"
+#include "via.h"
+#include "vial.h"
+#include <string.h>
 #include <math.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -33,6 +37,7 @@ typedef struct {
 } tb_side_t;
 
 static tb_side_t gL, gR;
+static bool g_reset_transform_state;
 static bool      g_scrl_inv           = COCOT_SCROLL_INV_DEFAULT;
 static uint8_t   g_scrl_div           = 4; // default divider index
 static bool      g_scrl_diag_any      = false;
@@ -91,6 +96,17 @@ static inline void unpack_cfg(uint32_t v) {
     g_cursor_accel_enabled = !cursor_accel_disabled;
 }
 
+// EEPROMとUSBの両方で同じインデックス範囲を検証する。全ビットを使用する。
+static bool tb_config_valid(uint32_t v) {
+    return ((v >> 0) & 0xF) < CPI_OPTION_SIZE &&
+           ((v >> 4) & 0x1F) < ANGLE_SIZE &&
+           ((v >> 10) & 0xF) < CPI_OPTION_SIZE &&
+           ((v >> 14) & 0x1F) < ANGLE_SIZE &&
+           ((v >> 21) & 0x7) < SCRL_DIV_SIZE &&
+           ((v >> 24) & 0x7) < SC_GAMMA_SIZE &&
+           ((v >> 28) & 0x7) < SC_GAIN_SIZE;
+}
+
 static inline void tb_save(void) { eeconfig_update_kb(pack_cfg()); }
 
 static uint8_t rot_index_for_angle(int16_t deg) {
@@ -117,23 +133,64 @@ static void tb_defaults(void) {
     g_cursor_accel_enabled = true;
 }
 
+// QMKのEEPROM初期化時に明示的に初期値を書く。これにより有効な設定値0も保存できる。
+void eeconfig_init_kb(void) {
+    tb_defaults();
+    tb_save();
+    eeconfig_init_user();
+}
+
 static void tb_load(void) {
     uint32_t raw = eeconfig_read_kb();
-    if (raw == 0 || raw == 0xFFFFFFFFu) {
+    if (!tb_config_valid(raw)) {
         tb_defaults();
         tb_save();
         return;
     }
     unpack_cfg(raw);
-    bool bad = false;
-    if (gL.cpi_idx >= CPI_OPTION_SIZE || gR.cpi_idx >= CPI_OPTION_SIZE) bad = true;
-    if (gL.rot_idx >= ANGLE_SIZE || gR.rot_idx >= ANGLE_SIZE) bad = true;
-    if (g_scrl_div >= SCRL_DIV_SIZE) bad = true;
-    if (g_sc_gain_idx >= SC_GAIN_SIZE) bad = true;
-    if (g_sc_gamma_idx >= SC_GAMMA_SIZE) bad = true;
-    if (bad) {
-        tb_defaults();
-        tb_save();
+}
+
+// VIAで未処理のコマンドだけがここへ来る。応答の送信はVIA本体が行う。
+void raw_hid_receive_kb(uint8_t *data, uint8_t length) {
+    if (length != 32 || data[0] != TB_SETTINGS_COMMAND || data[1] != 'T' || data[2] != 'B') {
+        if (length) data[0] = id_unhandled;
+        return;
+    }
+    uint8_t version = data[3];
+    uint8_t operation = data[4];
+    uint32_t config = (uint32_t)data[5] | ((uint32_t)data[6] << 8) |
+                      ((uint32_t)data[7] << 16) | ((uint32_t)data[8] << 24);
+    bool reserved_nonzero = false;
+    for (uint8_t i = 9; i < length; ++i) {
+        reserved_nonzero |= data[i] != 0;
+    }
+    memset(&data[5], 0, length - 5);
+    data[6] = is_keyboard_left() ? 1 : 2;
+
+    uint8_t status = TB_SETTINGS_OK;
+    if (version != TB_SETTINGS_VERSION) {
+        status = TB_SETTINGS_BAD_VERSION;
+    } else if (reserved_nonzero || (operation == TB_SETTINGS_GET && config != 0)) {
+        status = TB_SETTINGS_BAD_PACKET;
+    } else if (operation != TB_SETTINGS_GET && operation != TB_SETTINGS_SET) {
+        status = TB_SETTINGS_BAD_OPERATION;
+    } else if (operation == TB_SETTINGS_SET) {
+        if (!vial_unlocked) {
+            status = TB_SETTINGS_LOCKED;
+        } else if (!tb_config_valid(config)) {
+            status = TB_SETTINGS_INVALID_CONFIG;
+        } else if (config != pack_cfg()) {
+            unpack_cfg(config);
+            tb_save();
+            g_reset_transform_state = true;
+        }
+    }
+    data[5] = status;
+    if (status == TB_SETTINGS_OK) {
+        config = pack_cfg();
+        for (uint8_t i = 0; i < 4; ++i) {
+            data[7 + i] = (uint8_t)(config >> (8 * i));
+        }
     }
 }
 
@@ -244,6 +301,13 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
     static float x_acc_r = 0.0f, y_acc_r = 0.0f;
     static float h_acm_l = 0.0f, v_acm_l = 0.0f;
     static float h_acm_r = 0.0f, v_acm_r = 0.0f;
+
+    if (g_reset_transform_state) {
+        prev_x_l = prev_y_l = prev_x_r = prev_y_r = 0.0f;
+        x_acc_l = y_acc_l = x_acc_r = y_acc_r = 0.0f;
+        h_acm_l = v_acm_l = h_acm_r = v_acm_r = 0.0f;
+        g_reset_transform_state = false;
+    }
 
     const float sensitivity = 0.5f;            // base cursor sensitivity
     const float smoothing_factor = 0.7f;       // IIR smoothing
