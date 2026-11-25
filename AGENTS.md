@@ -8,7 +8,13 @@
 
 ## ビルド・テスト・開発コマンド
 - ビルドは `scripts/local_build_vial.sh` を使用すること。ファームウェアの出力先（`.vial-qmk/.build/`）はスクリプトのデフォルト設定から変更しない。
-- 構文/定義チェック: `cd qmk_firmware && qmk lint -kb split_ortho4x6`
+- 定義・キーマップチェック: リポジトリルートで `scripts/local_check_vial.sh` を実行。
+  - 初回は `scripts/local_build_vial.sh` で固定版 Vial QMK と Python 仮想環境を準備する。
+  - チェックはビルドと同じ固定リビジョンを検証し、QMK CLI の個人設定を読み込まない。
+  - 現在のソースを一時ツリーにコピーし、固定版 QMK の strict lint を適用する。キャッシュのキーボード定義は変更しない。
+  - `vial` キーマップ名の禁止と `default` キーマップ必須の規約のみ適用しない。検査対象は `target.json` の keyboard/keymap。
+  - JSON 定義・レイアウト・コードヘッダー等を検査する。C のコンパイルや実機動作は別途確認する。
+  - `VIAL_QMK_DIR` を指定する場合は、ビルドとチェックの両方で同じディレクトリを使う。
 - C フォーマット（任意）: `clang-format -i <files>`（差分は最小に）。
 
 ## コーディング規約・命名
@@ -19,8 +25,8 @@
 - `keymap.c` に定義されているキーマップは変更しない。
 
 ## テスト指針
-- 事前チェック: `qmk lint -kb split_ortho4x6` を PR 前に実行。
-- ビルド検証: `qmk compile -kb split_ortho4x6 -km vial` を通し、両手側で UF2 書き込みを確認。
+- 事前チェック: `scripts/local_check_vial.sh` を PR 前に実行。通常の `qmk lint` は異なる QMK や個人設定を参照するため使用しない。
+- ビルド検証: `scripts/local_build_vial.sh` で左右の UF2 を生成し、両手側で UF2 書き込みを確認。
 - 機能確認: ポインティングデバイス（PAW3222）動作と Vial レイヤの切替を検証。
 - 変更可視化: `keymap.c` のレイヤコメントを明確に維持。
 
