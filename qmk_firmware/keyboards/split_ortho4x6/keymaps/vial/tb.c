@@ -195,34 +195,15 @@ bool tb_process_record(uint16_t keycode, keyrecord_t* record) {
             }
             return false;
         case TB_SC_GAIN_UP:
-            if (record->event.pressed) {
-                float curr = k_sc_gain_table[g_sc_gain_idx];
-                float tgt  = curr + 0.10f;
-                float maxv = k_sc_gain_table[SC_GAIN_SIZE - 1];
-                if (tgt > maxv) tgt = maxv;
-                // 近傍から最も近いインデックスを探索
-                uint8_t best = g_sc_gain_idx;
-                float   best_err = fabsf(k_sc_gain_table[best] - tgt);
-                for (uint8_t i = 0; i < SC_GAIN_SIZE; ++i) {
-                    float e = fabsf(k_sc_gain_table[i] - tgt);
-                    if (e < best_err) { best = i; best_err = e; }
-                }
-                if (best != g_sc_gain_idx) { g_sc_gain_idx = best; tb_save(); }
+            if (record->event.pressed && g_sc_gain_idx + 1 < SC_GAIN_SIZE) {
+                g_sc_gain_idx++;
+                tb_save();
             }
             return false;
         case TB_SC_GAIN_DN:
-            if (record->event.pressed) {
-                float curr = k_sc_gain_table[g_sc_gain_idx];
-                float tgt  = curr - 0.10f;
-                float minv = k_sc_gain_table[0];
-                if (tgt < minv) tgt = minv;
-                uint8_t best = g_sc_gain_idx;
-                float   best_err = fabsf(k_sc_gain_table[best] - tgt);
-                for (uint8_t i = 0; i < SC_GAIN_SIZE; ++i) {
-                    float e = fabsf(k_sc_gain_table[i] - tgt);
-                    if (e < best_err) { best = i; best_err = e; }
-                }
-                if (best != g_sc_gain_idx) { g_sc_gain_idx = best; tb_save(); }
+            if (record->event.pressed && g_sc_gain_idx > 0) {
+                g_sc_gain_idx--;
+                tb_save();
             }
             return false;
         case TB_SC_GAMMA_UP:
@@ -305,8 +286,8 @@ static void tb_apply_transform_side(report_mouse_t* mr, bool is_left) {
         const float sc_gain  = k_sc_gain_table[g_sc_gain_idx];
         const float sc_gamma = k_sc_gamma_table[g_sc_gamma_idx];
 
-        // 1D scroll selection per side（平滑後の生値ベース）
-        float sx_s = smx, sy_s = smy;
+        // 左右のCPI倍率を適用してからスクロール軸とカーブを計算する
+        float sx_s = smx * cpi_scale, sy_s = smy * cpi_scale;
         if (!g_scrl_diag_any) {
             if (fabsf(sx_s) > fabsf(sy_s)) {
                 sy_s = 0.0f;
