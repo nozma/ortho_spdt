@@ -1,0 +1,63 @@
+name: Check Keyboard Definitions
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: definition-check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Definition check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Read pinned Vial QMK revision
+        id: vial-qmk
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          import re
+
+          source = Path('scripts/local_build_vial.sh').read_text()
+          match = re.search(r'^VIAL_QMK_REF="([0-9a-f]{40})"$', source, re.MULTILINE)
+          if match is None:
+              raise SystemExit('固定版 Vial QMK のリビジョンを取得できません')
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'revision={match[1]}\n')
+          PY
+
+      - name: Checkout pinned Vial QMK
+        uses: actions/checkout@v4
+        with:
+          repository: vial-kb/vial-qmk
+          ref: ${{ steps.vial-qmk.outputs.revision }}
+          path: .vial-qmk
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: .vial-qmk/requirements.txt
+
+      - name: Install check dependencies
+        run: |
+          python -m venv .vial-qmk/.venv
+          .vial-qmk/.venv/bin/python -m pip install -r .vial-qmk/requirements.txt
+
+      - name: Check definitions and keymaps
+        env:
+          VIAL_QMK_DIR: ${{ github.workspace }}/.vial-qmk
+        run: scripts/local_check_vial.sh

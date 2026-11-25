@@ -15,6 +15,8 @@
   - `vial` キーマップ名の禁止と `default` キーマップ必須の規約のみ適用しない。検査対象は `target.json` の keyboard/keymap。
   - JSON 定義・レイアウト・コードヘッダー等を検査する。C のコンパイルや実機動作は別途確認する。
   - `VIAL_QMK_DIR` を指定する場合は、ビルドとチェックの両方で同じディレクトリを使う。
+- CI: PR 作成・更新時は `Check Keyboard Definitions` が定義・キーマップを自動チェックする。
+- CI でのファームウェアビルド: GitHub Actions の `Build Keyboard Firmware` → `Run workflow` から対象ブランチを選んで手動実行する。push / PR では自動ビルドしない。左右の UF2 は実行結果の Artifacts から取得する。
 - C フォーマット（任意）: `clang-format -i <files>`（差分は最小に）。
 
 ## コーディング規約・命名
