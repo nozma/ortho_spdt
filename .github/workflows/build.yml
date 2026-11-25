@@ -1,13 +1,7 @@
 name: Build Keyboard Firmware
 
 on:
-  push:
-    branches:
-      - "**"
-    paths:
-      - "qmk_firmware/**"
-      - "target.json"
-      - ".github/workflows/build.yml"
+  workflow_dispatch:
 
 jobs:
   build:
